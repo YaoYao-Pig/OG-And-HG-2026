@@ -7,7 +7,7 @@
 仓库同时包含一套可交互的科学图版式 Web Atlas：
 
 - **OpenGalaxy**：19,771 个 GitHub 仓库、106,650 条协作关系，可按语言、AI 子领域和总技术领域观察。
-- **HubGalaxy**：从 [`cfahlgren1/hub-stats`](https://huggingface.co/datasets/cfahlgren1/hub-stats) 每日快照抽取的模型、数据集与 Space 生态。
+- **ModelGalaxy**：从 [`cfahlgren1/hub-stats`](https://huggingface.co/datasets/cfahlgren1/hub-stats) 每日快照抽取的 24,000 个模型、数据集与 Space 生态节点。
 - **自动发布**：[GitHub Actions workflow](.github/workflows/pages.yml) 在 `main` 更新、手动触发及每日计划任务时构建 GitHub Pages。
 
 前端开发、数据重建与首次 Pages 设置见 [visualization/README.md](visualization/README.md)。

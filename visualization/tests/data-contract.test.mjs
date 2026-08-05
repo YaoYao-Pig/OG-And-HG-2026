@@ -84,15 +84,25 @@ test("Hugging Face graph preserves source provenance and edge semantics", async 
   assert.equal(graph.meta.sourceLicense, "apache-2.0");
   assert.match(graph.meta.sourceRevision, /^[a-f0-9]{40}$/);
   assert.equal(graph.meta.provenance.method, "dataset-viewer-row-sample");
-  assert.equal(graph.nodes.length, 2_400);
+  assert.equal(graph.nodes.length, 24_000);
   assert.ok(graph.edges.length >= graph.nodes.length - 1);
-  assert.ok(graph.edges.length < 20_000);
+  assert.ok(graph.edges.length <= graph.nodes.length * 3);
+  assert.equal(graph.meta.componentCount, 1);
+  assert.equal(new Set(graph.nodes.map(({ id }) => id)).size, graph.nodes.length);
   assert.deepEqual(graph.meta.entityCounts, {
-    dataset: 700,
-    model: 1_200,
-    space: 500,
+    dataset: 7_000,
+    model: 12_000,
+    space: 5_000,
   });
   assert.deepEqual(graph.meta.facetOrder, ["type", "task", "library"]);
+  assert.deepEqual(graph.meta.serialization, {
+    landmarkLabels: 512,
+    topicLimit: 3,
+    descriptionLimit: 96,
+    omittedNodeFields: ["author", "lang", "updatedAt"],
+    omittedEdgeFields: ["w", "shared"],
+    compactAreaFields: ["primary", "tags"],
+  });
   for (const config of ["models", "datasets", "spaces"]) {
     assert.equal(graph.meta.sampling[config].config, config);
     assert.equal(graph.meta.sampling[config].split, "train");
@@ -101,6 +111,12 @@ test("Hugging Face graph preserves source provenance and edge semantics", async 
   }
 
   assert.ok(graph.nodes.every((node) => node.name.includes("/")));
+  assert.equal(graph.nodes.filter((node) => node.label).length, 512);
+  assert.ok(
+    graph.nodes.every(
+      (node) => !("author" in node) && !("lang" in node) && !("updatedAt" in node),
+    ),
+  );
   assert.ok(
     graph.nodes.every(
       (node) =>
@@ -110,6 +126,7 @@ test("Hugging Face graph preserves source provenance and edge semantics", async 
     ),
   );
   assert.ok(graph.edges.every((edge) => edge.inferred === 0 || edge.inferred === 1));
+  assert.ok(graph.edges.every((edge) => !("w" in edge) && !("shared" in edge)));
   assert.equal(
     graph.meta.edgeSemantics.observed + graph.meta.edgeSemantics.inferred,
     graph.edges.length,

@@ -12,9 +12,9 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const title = "OpenGalaxy × HubGalaxy · 开源与 AI 生态星图";
+const title = "OpenGalaxy × ModelGalaxy · 开源与 AI 生态星图";
 const description =
-  "探索 GitHub 开源协作与 Hugging Face AI 生态：19,771 个仓库、106,650 条协作关系，以及每日更新的模型、数据集与 Space 星图。";
+  "探索 GitHub 开源协作与 Hugging Face AI 生态：19,771 个仓库、106,650 条协作关系，以及 24,000 个每日更新的模型、数据集与 Space。";
 
 function resolveSiteUrl(): URL {
   const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
@@ -59,7 +59,7 @@ export const metadata: Metadata = {
     description,
     type: "website",
     locale: "zh_CN",
-    siteName: "OpenGalaxy × HubGalaxy",
+    siteName: "OpenGalaxy × ModelGalaxy",
     url: siteUrl,
     images: [
       {

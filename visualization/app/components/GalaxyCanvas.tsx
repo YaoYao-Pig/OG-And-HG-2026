@@ -70,6 +70,7 @@ type GalaxyCanvasProps = {
   facet: string;
   facetValue: string | null;
   density: EdgeDensity;
+  glowEnabled: boolean;
   minStrength: number;
   viewCommand: ViewCommand;
   onSelect: (index: number | null) => void;
@@ -119,6 +120,7 @@ export function GalaxyCanvas({
   facet,
   facetValue,
   density,
+  glowEnabled,
   minStrength,
   viewCommand,
   onSelect,
@@ -152,6 +154,7 @@ export function GalaxyCanvas({
     facet,
     facetValue,
     density,
+    glowEnabled,
     minStrength,
     onSelect,
     onHover,
@@ -369,7 +372,7 @@ export function GalaxyCanvas({
         score:
           (edge.b === 1 ? 5 : 0) +
           Math.log1p(Math.max(edge.strength, 0)) +
-          Math.log1p(Math.max(edge.w, 0)) * 0.25,
+          Math.log1p(Math.max(edge.w ?? edge.strength, 0)) * 0.25,
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.min(2_400, Math.max(720, Math.ceil(graph.nodes.length * 0.1))))
@@ -393,12 +396,13 @@ export function GalaxyCanvas({
       facet,
       facetValue,
       density,
+      glowEnabled,
       minStrength,
       onSelect,
       onHover,
     };
     requestDrawRef.current();
-  }, [density, facet, facetValue, hoveredIndex, minStrength, onHover, onSelect, selectedIndex]);
+  }, [density, facet, facetValue, glowEnabled, hoveredIndex, minStrength, onHover, onSelect, selectedIndex]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -581,7 +585,9 @@ export function GalaxyCanvas({
       context.fillStyle = vignette;
       context.fillRect(plotX - plotRadius, plotY - plotRadius, plotRadius * 2, plotRadius * 2);
 
-      const nebulaFade = clamp((2.4 - camera.zoom) / 1.1, 0, 1);
+      const nebulaFade = propsRef.current.glowEnabled
+        ? clamp((2.4 - camera.zoom) / 1.1, 0, 1)
+        : 0;
       const largestCommunity = communityVisuals[0]?.count ?? 1;
       context.globalCompositeOperation = "source-over";
       for (const community of communityVisuals) {
@@ -753,20 +759,22 @@ export function GalaxyCanvas({
       };
 
       context.globalCompositeOperation = "lighter";
-      for (const index of [...nodeVisuals.landmarkIndices].reverse()) {
-        if (!nodeVisible(index)) continue;
-        if (screenInPlot[index] === 0) continue;
-        const radius = nodeRadius(index);
-        const haloRadius = radius * 3.2 + 5;
-        context.globalAlpha = 0.2;
-        const sprite = glowSprite(nodeColor(index));
-        context.drawImage(
-          sprite,
-          screenX[index] - haloRadius,
-          screenY[index] - haloRadius,
-          haloRadius * 2,
-          haloRadius * 2,
-        );
+      if (propsRef.current.glowEnabled) {
+        for (const index of [...nodeVisuals.landmarkIndices].reverse()) {
+          if (!nodeVisible(index)) continue;
+          if (screenInPlot[index] === 0) continue;
+          const radius = nodeRadius(index);
+          const haloRadius = radius * 3.2 + 5;
+          context.globalAlpha = 0.2;
+          const sprite = glowSprite(nodeColor(index));
+          context.drawImage(
+            sprite,
+            screenX[index] - haloRadius,
+            screenY[index] - haloRadius,
+            haloRadius * 2,
+            haloRadius * 2,
+          );
+        }
       }
 
       for (let index = graph.nodes.length - 1; index >= 0; index -= 1) {

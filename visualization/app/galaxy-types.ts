@@ -92,7 +92,7 @@ export type GalaxyNode = {
   r: number;
   c: number;
   mc?: number;
-  lang: string;
+  lang?: string;
   areas?: GalaxyAreas;
   sourceType?: string;
   author?: string;
@@ -103,15 +103,15 @@ export type GalaxyNode = {
   contributors: number;
   degree: number;
   topics: string[] | string;
-  description: string;
+  description?: string;
   url: string;
 };
 
 export type GalaxyEdge = {
   s: number;
   t: number;
-  w: number;
-  shared: number;
+  w?: number;
+  shared?: number;
   strength: number;
   b?: 0 | 1;
   kind?: string;

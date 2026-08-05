@@ -3,7 +3,7 @@
 Interactive scientific-plate visualization for two public ecosystems:
 
 - **GitHub Collaboration** — 19,771 repositories and 106,650 shared-contributor relations for 2025-08 through 2026-07.
-- **Hugging Face Hub** — a daily high-signal model, dataset, and Space graph derived from [`cfahlgren1/hub-stats`](https://huggingface.co/datasets/cfahlgren1/hub-stats).
+- **ModelGalaxy / Hugging Face Hub** — a daily 24,000-node model, dataset, and Space graph derived from [`cfahlgren1/hub-stats`](https://huggingface.co/datasets/cfahlgren1/hub-stats).
 
 The browser only receives compact, precomputed graph JSON. It never connects to ClickHouse or downloads the multi-gigabyte Hugging Face source snapshot. The GitHub layout groups topology communities into irregular macro clusters, while every visible node remains a real exported repository.
 
@@ -25,7 +25,7 @@ python scripts/build_graph_data.py
 python scripts/build_hf_graph.py
 ```
 
-`build_hf_graph.py` records the source dataset revision and reads bounded, contiguous pages directly from the official Dataset Viewer `/rows` API for the `models`, `datasets`, and `spaces` configs. The output explicitly marks inferred semantic edges separately from observed lineage, declared-dataset, publisher, and Space-use relations.
+`build_hf_graph.py` records the source dataset revision and reads 12,000 models, 7,000 datasets, and 5,000 Spaces from bounded, contiguous pages on the official Dataset Viewer `/rows` API. The output explicitly marks inferred semantic edges separately from observed lineage, declared-dataset, publisher, and Space-use relations.
 
 GitHub Area enrichment is optional and read-only. Provide credentials only as environment variables, export the curated taxonomy, then rebuild:
 

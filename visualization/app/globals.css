@@ -496,10 +496,27 @@ canvas:focus-visible {
   border-bottom-color: #fff;
 }
 
+.plot-controls .glow-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.plot-controls .glow-toggle span {
+  color: #484845;
+  font-size: 6px;
+  letter-spacing: 0.08em;
+}
+
+.plot-controls .glow-toggle.is-active span {
+  color: #a9a9a4;
+}
+
 .plot-controls label {
   min-width: 0;
   display: grid;
   grid-template-columns: auto minmax(50px, 1fr);
+  grid-column: 1 / -1;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
@@ -968,11 +985,7 @@ canvas:focus-visible {
   }
 
   .plot-controls {
-    grid-template-columns: auto auto auto;
-  }
-
-  .plot-controls label {
-    grid-column: 1 / -1;
+    grid-template-columns: auto auto auto auto;
   }
 
   .plate-meta,

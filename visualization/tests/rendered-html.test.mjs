@@ -76,17 +76,22 @@ test("server-renders the dual-source Galaxy atlas", async () => {
   assert.match(html, /<html[^>]*\blang=["']zh-CN["']/i);
   assert.match(
     html,
-    /<title>OpenGalaxy × HubGalaxy · 开源与 AI 生态星图<\/title>/i,
+    /<title>OpenGalaxy × ModelGalaxy · 开源与 AI 生态星图<\/title>/i,
   );
   assert.match(
     html,
-    /<meta(?=[^>]*\bname=["']description["'])(?=[^>]*\bcontent=["'][^"']*GitHub[^"']*Hugging Face[^"']*19,771[^"']*106,650[^"']*["'])[^>]*>/i,
+    /<meta(?=[^>]*\bname=["']description["'])(?=[^>]*\bcontent=["'][^"']*GitHub[^"']*Hugging Face[^"']*19,771[^"']*106,650[^"']*24,000[^"']*["'])[^>]*>/i,
   );
   assert.match(html, /OPEN GALAXY/);
   assert.match(html, /开源与 AI 生态星图/);
   assert.match(html, /02 HUGGING FACE/);
   assert.match(html, /19,771/);
   assert.match(html, /106,650/);
+  assert.match(
+    html,
+    /<button(?=[^>]*\brole=["']switch["'])(?=[^>]*\baria-checked=["']true["'])(?=[^>]*\baria-label=["']辉光效果["'])[^>]*>/i,
+  );
+  assert.match(html, /Glow\s*<span[^>]*>On<\/span>/i);
   assert.match(
     html,
     /关系表示共享已知非 Bot 贡献者形成的协作亲和，不代表代码依赖或组织归属。/,
@@ -131,5 +136,5 @@ test("GitHub Pages mode emits a static index", async (context) => {
     "utf8",
   );
   assert.match(html, /<html[^>]*\blang=["']zh-CN["']/i);
-  assert.match(html, /OpenGalaxy × HubGalaxy/);
+  assert.match(html, /OpenGalaxy × ModelGalaxy/);
 });

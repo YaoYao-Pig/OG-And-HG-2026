@@ -34,6 +34,7 @@ const AREA_COLORS = [
 ];
 
 const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+const GLOW_PREFERENCE_KEY = "open-galaxy:glow-enabled";
 
 const SOURCE_COPY = {
   github: {
@@ -49,7 +50,7 @@ const SOURCE_COPY = {
     footer: "OPEN GALAXY / COLLABORATION ATLAS / 2026",
   },
   huggingface: {
-    title: "HubGalaxy",
+    title: "ModelGalaxy",
     period: "DAILY",
     figure: "FIG. 02 — HUGGING FACE MODEL LINEAGE & HUB ECOSYSTEM",
     dataFile: "/data/huggingface.json",
@@ -58,7 +59,7 @@ const SOURCE_COPY = {
     noun: "artifacts",
     relation: "relations",
     link: "View artifact on Hugging Face ↗",
-    footer: "HUB GALAXY / MODEL LINEAGE ATLAS / 2026",
+    footer: "MODEL GALAXY / MODEL LINEAGE ATLAS / 2026",
   },
 } as const;
 
@@ -112,33 +113,19 @@ async function fetchGraph(
 ) {
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`Data request failed: ${response.status}`);
-  const total = Number(response.headers.get("content-length")) || 0;
-  if (!response.body) {
+  let progress = 0.08;
+  onProgress(progress);
+  const progressTimer = window.setInterval(() => {
+    progress = Math.min(0.94, progress + (0.94 - progress) * 0.035);
+    onProgress(progress);
+  }, 240);
+  try {
+    const payload = (await response.json()) as GalaxyGraph;
     onProgress(1);
-    return (await response.json()) as GalaxyGraph;
+    return payload;
+  } finally {
+    window.clearInterval(progressTimer);
   }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.length;
-    onProgress(
-      total
-        ? Math.min(received / total, 0.99)
-        : Math.min(received / 5_000_000, 0.96),
-    );
-  }
-  const bytes = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  onProgress(1);
-  return JSON.parse(new TextDecoder().decode(bytes)) as GalaxyGraph;
 }
 
 export default function GalaxyExplorer() {
@@ -151,6 +138,8 @@ export default function GalaxyExplorer() {
   const [activeFacet, setActiveFacet] = useState("language");
   const [selectedFacetValue, setSelectedFacetValue] = useState<string | null>(null);
   const [density, setDensity] = useState<EdgeDensity>("all");
+  const [glowEnabled, setGlowEnabled] = useState(true);
+  const [glowPreferenceReady, setGlowPreferenceReady] = useState(false);
   const [minStrength, setMinStrength] = useState(0);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -159,6 +148,31 @@ export default function GalaxyExplorer() {
   const [viewCommand, setViewCommand] = useState<ViewCommand>({ id: 0, type: "fit" });
   const searchRef = useRef<HTMLInputElement>(null);
   const copy = SOURCE_COPY[source];
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const storedPreference = window.localStorage.getItem(GLOW_PREFERENCE_KEY);
+        if (storedPreference === "off") setGlowEnabled(false);
+      } catch {
+        // Storage can be unavailable in privacy-restricted browser contexts.
+      }
+      setGlowPreferenceReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!glowPreferenceReady) return;
+    try {
+      window.localStorage.setItem(
+        GLOW_PREFERENCE_KEY,
+        glowEnabled ? "on" : "off",
+      );
+    } catch {
+      // The switch still works for this session when storage is unavailable.
+    }
+  }, [glowEnabled, glowPreferenceReady]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -378,6 +392,7 @@ export default function GalaxyExplorer() {
           facet={activeFacet}
           facetValue={selectedFacetValue}
           density={density}
+          glowEnabled={glowEnabled}
           minStrength={minStrength}
           viewCommand={viewCommand}
           onSelect={(index) => {
@@ -495,7 +510,7 @@ export default function GalaxyExplorer() {
                 {selectedConnections.map(({ edge, node, otherIndex }) => (
                   <button type="button" key={`${edge.s}-${edge.t}-${edge.kind ?? "relation"}`} onClick={() => focusNode(otherIndex)}>
                     <span>{node.name}</span>
-                    <span>{source === "github" ? edge.shared : (edge.kind ?? "link").replaceAll("_", " ")}</span>
+                    <span>{source === "github" ? (edge.shared ?? 0) : (edge.kind ?? "link").replaceAll("_", " ")}</span>
                     <span>{formatScore(edge.strength)}</span>
                   </button>
                 ))}
@@ -520,7 +535,7 @@ export default function GalaxyExplorer() {
                 ) : (
                   <>
                     <p>
-                      HubGalaxy distills the daily <b>Hugging Face Hub</b> snapshot into a high-signal model lineage and artifact ecosystem. This plate contains <b>{formatInteger(graph?.nodes.length ?? 0)} artifacts</b> and <b>{formatInteger(graph?.edges.length ?? 0)} declared or inferred relations</b>.
+                      ModelGalaxy distills the daily <b>Hugging Face Hub</b> snapshot into a high-signal model lineage and artifact ecosystem. This plate contains <b>{formatInteger(graph?.nodes.length ?? 0)} artifacts</b> and <b>{formatInteger(graph?.edges.length ?? 0)} declared or inferred relations</b>.
                     </p>
                     <p>
                       数据来自 cfahlgren1/hub-stats 的每日快照。模型、数据集与 Space 通过谱系、发布者和受控语义亲和形成可浏览星图；全量五百余万条记录不会直接下发浏览器。
@@ -595,7 +610,7 @@ export default function GalaxyExplorer() {
                   <b>{strongestNames[0]} ↔ {strongestNames[1]}</b>
                   <small>
                     {source === "github"
-                      ? `${strongestPair.edge.shared} shared contributors / strength ${formatScore(strongestPair.edge.strength)}`
+                      ? `${strongestPair.edge.shared ?? 0} shared contributors / strength ${formatScore(strongestPair.edge.strength)}`
                       : `${(strongestPair.edge.kind ?? "relation").replaceAll("_", " ")} / strength ${formatScore(strongestPair.edge.strength)}`}
                   </small>
                 </button>
@@ -607,6 +622,16 @@ export default function GalaxyExplorer() {
             <span>Plot</span>
             <button type="button" className={density === "all" ? "is-active" : ""} onClick={() => setDensity("all")}>All relations</button>
             <button type="button" className={density === "signal" ? "is-active" : ""} onClick={() => setDensity("signal")}>Structural spine</button>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={glowEnabled}
+              aria-label="辉光效果"
+              className={`glow-toggle${glowEnabled ? " is-active" : ""}`}
+              onClick={() => setGlowEnabled((enabled) => !enabled)}
+            >
+              Glow <span aria-hidden="true">{glowEnabled ? "On" : "Off"}</span>
+            </button>
             <label>
               Strength ≥ {minStrength.toFixed(1)}
               <input type="range" min="0" max="10" step="0.5" value={minStrength} onChange={(event) => setMinStrength(Number(event.target.value))} />

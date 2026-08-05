@@ -43,10 +43,14 @@ from build_graph_data import (
 
 SOURCE_DATASET = "cfahlgren1/hub-stats"
 SOURCE_URL = f"https://huggingface.co/datasets/{SOURCE_DATASET}"
-BUILD_VERSION = "hf-semantic-spine-v3-dataset-viewer"
+BUILD_VERSION = "hf-semantic-spine-v5-24k-compact"
 USER_AGENT = "OpenGalaxy-HuggingFace-Atlas/1.0 (+https://huggingface.co)"
 DATASET_VIEWER_URL = "https://datasets-server.huggingface.co"
 VIEWER_PAGE_SIZE = 100
+VIEWER_REQUEST_INTERVAL_SECONDS = 0.2
+DEFAULT_MODEL_COUNT = 12_000
+DEFAULT_DATASET_COUNT = 7_000
+DEFAULT_SPACE_COUNT = 5_000
 
 TYPE_ORDER = {"model": 0, "dataset": 1, "space": 2}
 TYPE_LABEL = {"model": "Model", "dataset": "Dataset", "space": "Space"}
@@ -111,7 +115,7 @@ class TransientAPIError(APIRequestError):
     """A retryable remote API error that may safely use a local fallback."""
 
 
-def _request_json(url: str, *, timeout: float, retries: int = 4) -> tuple[Any, str | None]:
+def _request_json(url: str, *, timeout: float, retries: int = 7) -> tuple[Any, str | None]:
     """Return decoded JSON and the Link header with bounded transient retries."""
 
     for attempt in range(retries):
@@ -143,6 +147,14 @@ def _request_json(url: str, *, timeout: float, retries: int = 4) -> tuple[Any, s
                 raise TransientAPIError(
                     f"Hugging Face API remained unavailable with HTTP {exc.code}: {url}"
                 ) from exc
+            retry_after = exc.headers.get("Retry-After")
+            try:
+                retry_delay = float(retry_after) if retry_after is not None else 0.0
+            except ValueError:
+                retry_delay = 0.0
+            if exc.code == 429:
+                time.sleep(max(retry_delay, min(30.0, 1.5 * (2**attempt))))
+                continue
         except (URLError, TimeoutError) as exc:
             if attempt + 1 == retries:
                 raise TransientAPIError(f"Hugging Face API request failed: {url}") from exc
@@ -242,6 +254,15 @@ def fetch_viewer_rows(
             if isinstance(item, dict) and isinstance(item.get("truncated_cells"), list):
                 truncated_cells += len(item["truncated_cells"])
         offset += len(rows)
+        if page_count % 20 == 0 or len(records) >= target:
+            print(
+                f"Dataset Viewer {config}: {len(records):,}/{target:,} rows "
+                f"({page_count} pages)",
+                file=sys.stderr,
+                flush=True,
+            )
+        if len(records) < target:
+            time.sleep(VIEWER_REQUEST_INTERVAL_SECONDS)
 
     if len(records) < target:
         raise ValueError(f"Only received {len(records)} of {target} requested {config} rows")
@@ -368,7 +389,7 @@ def _display_topics(tags: list[str]) -> list[str]:
         "size_categories:",
     )
     filtered = [tag for tag in tags if not tag.startswith(excluded_prefixes)]
-    return filtered[:8]
+    return filtered[:3]
 
 
 def prepare_nodes(
@@ -430,11 +451,7 @@ def prepare_nodes(
                 + 1.9 * math.log1p(trending)
                 + {"model": 0.35, "dataset": 0.22, "space": 0.12}[kind]
             )
-            description = _clean_text(record.get("description"))
-            if not description:
-                description = (
-                    f"Hugging Face {TYPE_LABEL[kind].lower()} for {primary_task} · {library}."
-                )
+            description = _clean_text(record.get("description"), limit=96)
 
             linked_models = sorted(
                 {value for value in (record.get("models") or ()) if isinstance(value, str)}
@@ -732,6 +749,9 @@ def build_payload(
     output_nodes: list[dict[str, Any]] = []
     private_fields = {
         "repoId",
+        "author",
+        "lang",
+        "updatedAt",
         "_task",
         "_domain",
         "_tags",
@@ -739,8 +759,28 @@ def build_payload(
         "_linkedModels",
         "_linkedDatasets",
     }
+    # `label` duplicates `name` and is only used to select overview callouts.
+    # Retain it for a generous importance-ranked landmark set, not all 24k rows.
+    landmark_indexes = set(
+        sorted(
+            range(len(nodes)),
+            key=lambda index: (-nodes[index]["r"], nodes[index]["id"]),
+        )[: min(512, len(nodes))]
+    )
     for index, node in enumerate(nodes):
         output = {key: value for key, value in node.items() if key not in private_fields}
+        if index not in landmark_indexes:
+            output.pop("label", None)
+        if not output.get("description"):
+            output.pop("description", None)
+        output["areas"] = {
+            facet: {
+                key: value
+                for key, value in area.items()
+                if key in {"primary", "tags"}
+            }
+            for facet, area in output["areas"].items()
+        }
         output.update(
             {
                 "x": coordinates[index][0],
@@ -760,8 +800,6 @@ def build_payload(
             {
                 "s": edge["s"],
                 "t": edge["t"],
-                "w": compact_number(edge["w"], 3),
-                "shared": edge["shared"],
                 "strength": compact_number(edge["strength"], 3),
                 "b": 1 if index in backbone else 0,
                 "kind": edge["kind"],
@@ -829,6 +867,14 @@ def build_payload(
                 "layoutIterations": layout_iterations,
                 "resolution": resolution,
             },
+            "serialization": {
+                "landmarkLabels": len(landmark_indexes),
+                "topicLimit": 3,
+                "descriptionLimit": 96,
+                "omittedNodeFields": ["author", "lang", "updatedAt"],
+                "omittedEdgeFields": ["w", "shared"],
+                "compactAreaFields": ["primary", "tags"],
+            },
             "twinIds": [strongest["s"], strongest["t"]],
             "twinNodeIds": [nodes[strongest["s"]]["id"], nodes[strongest["t"]]["id"]],
             "twinNames": [nodes[strongest["s"]]["label"], nodes[strongest["t"]]["label"]],
@@ -879,9 +925,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--api-base", default="https://huggingface.co")
     parser.add_argument("--viewer-base", default=DATASET_VIEWER_URL)
-    parser.add_argument("--models", type=int, default=1200)
-    parser.add_argument("--datasets", type=int, default=700)
-    parser.add_argument("--spaces", type=int, default=500)
+    parser.add_argument("--models", type=int, default=DEFAULT_MODEL_COUNT)
+    parser.add_argument("--datasets", type=int, default=DEFAULT_DATASET_COUNT)
+    parser.add_argument("--spaces", type=int, default=DEFAULT_SPACE_COUNT)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--max-iterations", type=int, default=32)
     parser.add_argument("--resolution", type=float, default=1.15)
