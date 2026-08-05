@@ -2,10 +2,10 @@
 
 Interactive scientific-plate visualization for two public ecosystems:
 
-- **GitHub Collaboration** — 4,243 repositories and 46,173 shared-contributor relations for 2025-08 through 2026-07.
+- **GitHub Collaboration** — 19,771 repositories and 106,650 shared-contributor relations for 2025-08 through 2026-07.
 - **Hugging Face Hub** — a daily high-signal model, dataset, and Space graph derived from [`cfahlgren1/hub-stats`](https://huggingface.co/datasets/cfahlgren1/hub-stats).
 
-The browser only receives compact, precomputed graph JSON. It never connects to ClickHouse or downloads the multi-gigabyte Hugging Face source snapshot.
+The browser only receives compact, precomputed graph JSON. It never connects to ClickHouse or downloads the multi-gigabyte Hugging Face source snapshot. The GitHub layout groups topology communities into irregular macro clusters, while every visible node remains a real exported repository.
 
 ## Local development
 

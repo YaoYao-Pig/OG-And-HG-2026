@@ -34,6 +34,10 @@ export type GalaxyCommunity = {
   color?: string;
   x?: number;
   y?: number;
+  radius?: number;
+  angle?: number;
+  aspect?: number;
+  microCommunityCount?: number;
 };
 
 export type GalaxyMeta = {
@@ -87,6 +91,7 @@ export type GalaxyNode = {
   y: number;
   r: number;
   c: number;
+  mc?: number;
   lang: string;
   areas?: GalaxyAreas;
   sourceType?: string;

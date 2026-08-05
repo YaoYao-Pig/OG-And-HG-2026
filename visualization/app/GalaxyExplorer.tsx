@@ -511,7 +511,7 @@ export default function GalaxyExplorer() {
                 {source === "github" ? (
                   <>
                     <p>
-                      OpenGalaxy is generated from the contributor collaboration network of active GitHub repositories observed across twelve complete months. The graph contains <b>{formatInteger(graph?.nodes.length ?? 4_243)} repositories</b> and <b>{formatInteger(graph?.edges.length ?? 46_173)} relations</b>.
+                      OpenGalaxy is generated from the contributor collaboration network of active GitHub repositories observed across twelve complete months. The graph contains <b>{formatInteger(graph?.nodes.length ?? 19_771)} repositories</b> and <b>{formatInteger(graph?.edges.length ?? 106_650)} relations</b>.
                     </p>
                     <p>
                       OpenGalaxy 由 2025 年 8 月至 2026 年 7 月间的 GitHub 开源协作网络生成。现在可按编程语言、AI 子领域与总技术领域切换观察。

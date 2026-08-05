@@ -80,13 +80,13 @@ test("server-renders the dual-source Galaxy atlas", async () => {
   );
   assert.match(
     html,
-    /<meta(?=[^>]*\bname=["']description["'])(?=[^>]*\bcontent=["'][^"']*GitHub[^"']*Hugging Face[^"']*4,243[^"']*46,173[^"']*["'])[^>]*>/i,
+    /<meta(?=[^>]*\bname=["']description["'])(?=[^>]*\bcontent=["'][^"']*GitHub[^"']*Hugging Face[^"']*19,771[^"']*106,650[^"']*["'])[^>]*>/i,
   );
   assert.match(html, /OPEN GALAXY/);
   assert.match(html, /开源与 AI 生态星图/);
   assert.match(html, /02 HUGGING FACE/);
-  assert.match(html, /4,243/);
-  assert.match(html, /46,173/);
+  assert.match(html, /19,771/);
+  assert.match(html, /106,650/);
   assert.match(
     html,
     /关系表示共享已知非 Bot 贡献者形成的协作亲和，不代表代码依赖或组织归属。/,

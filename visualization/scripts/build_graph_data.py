@@ -23,13 +23,14 @@ import os
 import re
 import statistics
 import tempfile
+import time
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
 
-ARTIFACT_NAME = "open-galaxy-github-202508-202607-preview"
-ALGORITHM_VERSION = "topology-force-galactic-disc-v3"
+ARTIFACT_NAME = "open-galaxy-github-202508-202607-final"
+ALGORITHM_VERSION = "hierarchical-clustered-galaxy-v4"
 GOLDEN_ANGLE = math.pi * (3.0 - math.sqrt(5.0))
 
 COMMON_LANGUAGE_COLORS = {
@@ -1805,6 +1806,510 @@ def continuous_disc_layout(
     return coordinates, bounds, metrics
 
 
+def macro_community_assignments(
+    micro_communities: list[int],
+    edges: list[tuple[int, int, float, int, float]],
+    *,
+    target_count: int,
+) -> list[int]:
+    """Aggregate topology communities into a small deterministic macro atlas.
+
+    Large micro-communities seed the macro atlas, then grow through real
+    inter-community affinity with a load penalty that prevents one dominant
+    seed from swallowing the full graph. Disconnected components remain in a
+    small set of balanced satellite fields.
+    """
+
+    micro_members: dict[int, list[int]] = defaultdict(list)
+    for node_index, community_id in enumerate(micro_communities):
+        micro_members[community_id].append(node_index)
+    micro_ids = sorted(micro_members)
+    if not micro_ids:
+        return []
+    target_count = max(1, min(target_count, len(micro_ids)))
+    micro_index = {community_id: index for index, community_id in enumerate(micro_ids)}
+    sizes = [len(micro_members[community_id]) for community_id in micro_ids]
+
+    affinity: dict[tuple[int, int], float] = defaultdict(float)
+    for source, target, weight, _, strength in edges:
+        source_micro = micro_index[micro_communities[source]]
+        target_micro = micro_index[micro_communities[target]]
+        if source_micro == target_micro:
+            continue
+        pair = (
+            (source_micro, target_micro)
+            if source_micro < target_micro
+            else (target_micro, source_micro)
+        )
+        affinity[pair] += math.log1p(max(weight, 0.0)) + 0.55 * math.log1p(
+            max(strength, 0.0)
+        )
+
+    micro_adjacency = [set() for _ in micro_ids]
+    for left, right in affinity:
+        micro_adjacency[left].add(right)
+        micro_adjacency[right].add(left)
+    topology_components: list[list[int]] = []
+    unseen = set(range(len(micro_ids)))
+    while unseen:
+        seed = min(unseen)
+        unseen.remove(seed)
+        stack = [seed]
+        component = []
+        while stack:
+            current = stack.pop()
+            component.append(current)
+            for neighbor in sorted(micro_adjacency[current], reverse=True):
+                if neighbor in unseen:
+                    unseen.remove(neighbor)
+                    stack.append(neighbor)
+        topology_components.append(sorted(component))
+    topology_components.sort(
+        key=lambda component: (
+            -sum(sizes[index] for index in component),
+            min(micro_ids[index] for index in component),
+        )
+    )
+    main_micro_indexes = set(topology_components[0])
+    satellite_components = topology_components[1:]
+    main_target = min(len(main_micro_indexes), target_count)
+    satellite_slots = target_count - main_target
+
+    main_node_count = sum(sizes[index] for index in main_micro_indexes)
+    ideal_load = main_node_count / main_target
+    seeds = sorted(
+        main_micro_indexes,
+        key=lambda index: (-sizes[index], micro_ids[index]),
+    )[:main_target]
+    macro_by_index = {seed: macro_id for macro_id, seed in enumerate(seeds)}
+    loads = [sizes[seed] for seed in seeds]
+    unassigned = set(main_micro_indexes) - set(seeds)
+
+    # Grow every seed through real affinity edges.  Dividing by current macro
+    # load prevents the largest seed from absorbing the whole main component.
+    while unassigned:
+        best_assignment: tuple[float, int, int] | None = None
+        for index in sorted(unassigned):
+            scores: dict[int, float] = defaultdict(float)
+            for neighbor in micro_adjacency[index]:
+                macro_id = macro_by_index.get(neighbor)
+                if macro_id is None:
+                    continue
+                pair = (index, neighbor) if index < neighbor else (neighbor, index)
+                scores[macro_id] += affinity[pair]
+            for macro_id, signal in scores.items():
+                load_penalty = (1.0 + loads[macro_id] / ideal_load) ** 1.45
+                score = signal / load_penalty
+                candidate = (score, -micro_ids[index], -macro_id)
+                if best_assignment is None or candidate > best_assignment:
+                    best_assignment = candidate
+        if best_assignment is None:
+            index = min(unassigned, key=lambda item: (-sizes[item], micro_ids[item]))
+            macro_id = min(range(main_target), key=lambda item: (loads[item], item))
+        else:
+            _, negative_micro_id, negative_macro_id = best_assignment
+            index = micro_index[-negative_micro_id]
+            macro_id = -negative_macro_id
+        macro_by_index[index] = macro_id
+        loads[macro_id] += sizes[index]
+        unassigned.remove(index)
+
+    macro_by_micro = {
+        micro_ids[index]: macro_by_index[index] for index in main_micro_indexes
+    }
+
+    # Disconnected graph components stay intact. A stable component key spreads
+    # their display membership across the available macro colors without the
+    # artificial equal-capacity buckets that topology cannot justify.
+    if satellite_components:
+        if satellite_slots <= 0:
+            slots = list(range(main_target))
+        else:
+            slots = list(range(main_target, main_target + satellite_slots))
+        for component in satellite_components:
+            component_key = min(micro_ids[index] for index in component)
+            slot_position = min(
+                len(slots) - 1,
+                int(
+                    stable_unit(f"satellite-macro:{component_key}")
+                    * len(slots)
+                ),
+            )
+            macro_id = slots[slot_position]
+            for index in component:
+                macro_by_micro[micro_ids[index]] = macro_id
+    return [macro_by_micro[community_id] for community_id in micro_communities]
+
+
+def clustered_island_layout(
+    nodes: list[dict[str, Any]],
+    micro_communities: list[int],
+    degree: list[int],
+    edges: list[tuple[int, int, float, int, float]],
+    backbone_indexes: set[int],
+    components: list[list[int]],
+    *,
+    iterations: int,
+) -> tuple[
+    list[tuple[float, float]],
+    dict[str, float],
+    dict[str, Any],
+    list[int],
+]:
+    """Create one continuous galaxy composed of irregular topology islands.
+
+    Expensive force simulation is restricted to at most eighteen macro nodes.
+    Real repositories are then placed into deterministic micro-community lobes,
+    with strong cross-community endpoints pulled slightly toward their bridge.
+    Runtime is O(nodes + edges + macro_iterations).
+    """
+
+    node_count = len(nodes)
+    requested_macros = 18 if node_count >= 8_000 else 14 if node_count >= 1_500 else 10
+    macro_communities = macro_community_assignments(
+        micro_communities,
+        edges,
+        target_count=requested_macros,
+    )
+    macro_members: dict[int, list[int]] = defaultdict(list)
+    micro_members: dict[int, list[int]] = defaultdict(list)
+    for node_index, macro_id in enumerate(macro_communities):
+        macro_members[macro_id].append(node_index)
+        micro_members[micro_communities[node_index]].append(node_index)
+    main_members = components[0]
+    main_set = set(main_members)
+    main_node_count = len(main_members)
+    macro_count = len(macro_members)
+    macro_sizes = [
+        sum(node_index in main_set for node_index in macro_members[macro_id])
+        for macro_id in range(macro_count)
+    ]
+    largest_macro = max(macro_sizes)
+    macro_radii = [
+        0.07 + 0.19 * (size / largest_macro) ** 0.52 for size in macro_sizes
+    ]
+
+    macro_affinity: dict[tuple[int, int], float] = defaultdict(float)
+    for source, target, weight, _, strength in edges:
+        left = macro_communities[source]
+        right = macro_communities[target]
+        if left == right:
+            continue
+        pair = (left, right) if left < right else (right, left)
+        macro_affinity[pair] += math.log1p(max(weight, 0.0)) + 0.55 * math.log1p(
+            max(strength, 0.0)
+        )
+
+    macro_x = [0.0] * macro_count
+    macro_y = [0.0] * macro_count
+    target_radius = [0.0] * macro_count
+    phase = stable_unit(nodes[0]["id"]) * math.tau
+    for macro_id in range(1, macro_count):
+        fraction = macro_id / max(1, macro_count - 1)
+        radius = 0.18 + 0.49 * math.sqrt(fraction)
+        angle = phase + macro_id * GOLDEN_ANGLE + 0.18 * (
+            stable_unit(f"macro-angle:{macro_id}") - 0.5
+        )
+        macro_x[macro_id] = radius * math.cos(angle)
+        macro_y[macro_id] = radius * math.sin(angle)
+        target_radius[macro_id] = radius
+
+    maximum_affinity = max(macro_affinity.values(), default=1.0)
+    for iteration in range(iterations):
+        progress = iteration / max(1, iterations - 1)
+        force_x = [0.0] * macro_count
+        force_y = [0.0] * macro_count
+        for left in range(macro_count):
+            for right in range(left + 1, macro_count):
+                delta_x = macro_x[right] - macro_x[left]
+                delta_y = macro_y[right] - macro_y[left]
+                distance = math.hypot(delta_x, delta_y) + 1e-9
+                minimum = (
+                    0.68 if left < 4 and right < 4 else 0.9
+                ) * (macro_radii[left] + macro_radii[right])
+                if distance < minimum:
+                    magnitude = 0.045 * (minimum - distance) / distance
+                else:
+                    magnitude = 0.00034 / (distance * distance)
+                push_x = delta_x * magnitude
+                push_y = delta_y * magnitude
+                force_x[left] -= push_x
+                force_y[left] -= push_y
+                force_x[right] += push_x
+                force_y[right] += push_y
+
+        for (left, right), affinity in macro_affinity.items():
+            delta_x = macro_x[right] - macro_x[left]
+            delta_y = macro_y[right] - macro_y[left]
+            distance = math.hypot(delta_x, delta_y) + 1e-9
+            affinity_share = math.sqrt(affinity / maximum_affinity)
+            desired = 0.24 + 0.3 * (1.0 - affinity_share)
+            magnitude = 0.021 * (0.3 + 0.7 * affinity_share) * (
+                distance - desired
+            ) / distance
+            pull_x = delta_x * magnitude
+            pull_y = delta_y * magnitude
+            force_x[left] += pull_x
+            force_y[left] += pull_y
+            force_x[right] -= pull_x
+            force_y[right] -= pull_y
+
+        for macro_id in range(macro_count):
+            radius = math.hypot(macro_x[macro_id], macro_y[macro_id]) + 1e-9
+            if macro_id == 0:
+                force_x[macro_id] -= macro_x[macro_id] * 0.09
+                force_y[macro_id] -= macro_y[macro_id] * 0.09
+            else:
+                radial_force = 0.026 * (target_radius[macro_id] - radius)
+                force_x[macro_id] += macro_x[macro_id] / radius * radial_force
+                force_y[macro_id] += macro_y[macro_id] / radius * radial_force
+
+        temperature = 0.035 * (1.0 - progress) ** 1.25 + 0.0015
+        for macro_id in range(macro_count):
+            move_x = force_x[macro_id]
+            move_y = force_y[macro_id]
+            movement = math.hypot(move_x, move_y)
+            if movement > temperature:
+                move_x *= temperature / movement
+                move_y *= temperature / movement
+            macro_x[macro_id] += move_x
+            macro_y[macro_id] += move_y
+
+        center_x = sum(
+            macro_x[index] * macro_sizes[index] for index in range(macro_count)
+        ) / main_node_count
+        center_y = sum(
+            macro_y[index] * macro_sizes[index] for index in range(macro_count)
+        ) / main_node_count
+        for macro_id in range(macro_count):
+            macro_x[macro_id] -= center_x
+            macro_y[macro_id] -= center_y
+
+    macro_micro_ids: dict[int, list[int]] = defaultdict(list)
+    for micro_id, members in micro_members.items():
+        if any(node_index in main_set for node_index in members):
+            macro_micro_ids[macro_communities[members[0]]].append(micro_id)
+    for micro_ids in macro_micro_ids.values():
+        micro_ids.sort(key=lambda micro_id: (-len(micro_members[micro_id]), micro_id))
+
+    coordinates: list[tuple[float, float]] = [(0.0, 0.0)] * node_count
+    for macro_id in range(macro_count):
+        micro_ids = macro_micro_ids[macro_id]
+        macro_angle = math.atan2(macro_y[macro_id], macro_x[macro_id])
+        if math.hypot(macro_x[macro_id], macro_y[macro_id]) < 1e-6:
+            macro_angle = phase
+        orientation = macro_angle + math.pi / 2 + 0.35 * (
+            stable_unit(f"macro-orientation:{macro_id}") - 0.5
+        )
+        for position, micro_id in enumerate(micro_ids):
+            members = sorted(
+                (
+                    node_index
+                    for node_index in micro_members[micro_id]
+                    if node_index in main_set
+                ),
+                key=lambda index: (
+                    -nodes[index]["r"],
+                    -degree[index],
+                    nodes[index]["id"],
+                ),
+            )
+            if position == 0:
+                center_radius = macro_radii[macro_id] * 0.055
+            else:
+                center_radius = macro_radii[macro_id] * (
+                    0.19
+                    + 0.48
+                    * math.sqrt(position / max(1, len(micro_ids) - 1))
+                )
+            center_angle = (
+                orientation
+                + position * GOLDEN_ANGLE
+                + 0.24 * (stable_unit(f"micro-angle:{micro_id}") - 0.5)
+            )
+            micro_center_x = macro_x[macro_id] + center_radius * math.cos(center_angle)
+            micro_center_y = macro_y[macro_id] + center_radius * math.sin(center_angle)
+            extent_share = 0.1 + 0.58 * math.sqrt(
+                len(members) / max(1, macro_sizes[macro_id])
+            )
+            micro_extent = macro_radii[macro_id] * max(
+                0.12, min(0.54, extent_share)
+            )
+            local_orientation = orientation + 0.55 * (
+                stable_unit(f"micro-orientation:{micro_id}") - 0.5
+            )
+            local_aspect = 1.12 + 0.6 * stable_unit(f"micro-aspect:{micro_id}")
+            cosine = math.cos(local_orientation)
+            sine = math.sin(local_orientation)
+            for local_position, node_index in enumerate(members):
+                if len(members) == 1:
+                    local_radius = 0.0
+                else:
+                    fraction = (local_position + 0.28) / len(members)
+                    local_radius = micro_extent * (0.045 + 0.94 * math.sqrt(fraction))
+                local_angle = (
+                    local_position * GOLDEN_ANGLE
+                    + stable_unit(f"node-angle:{nodes[node_index]['id']}") * 0.58
+                )
+                irregularity = (
+                    1
+                    + 0.15 * math.sin(local_angle * 3 + micro_id)
+                    + 0.07 * math.sin(local_angle * 5 + macro_id)
+                )
+                local_x = (
+                    local_radius * irregularity * math.cos(local_angle) * local_aspect
+                )
+                local_y = (
+                    local_radius * irregularity * math.sin(local_angle) / local_aspect
+                )
+                coordinates[node_index] = (
+                    micro_center_x + local_x * cosine - local_y * sine,
+                    micro_center_y + local_x * sine + local_y * cosine,
+                )
+
+    # Keep every disconnected graph component intact, but distribute the 944
+    # small components as natural satellite islands across the full outer disc
+    # instead of collapsing them into a few artificial mega-communities.
+    satellite_phase = phase + 0.37
+    for component in components[1:]:
+        component_key = min(nodes[index]["id"] for index in component)
+        center_angle = (
+            satellite_phase
+            + stable_unit(f"satellite-angle:{component_key}") * math.tau
+        )
+        center_radius = 0.56 + 0.34 * stable_unit(
+            f"satellite-radius:{component_key}"
+        )
+        center_x = center_radius * math.cos(center_angle)
+        center_y = center_radius * math.sin(center_angle)
+        local_extent = min(0.032, 0.0035 + 0.0032 * math.sqrt(len(component)))
+        ordered_component = sorted(
+            component,
+            key=lambda index: (-nodes[index]["r"], -degree[index], nodes[index]["id"]),
+        )
+        local_phase = stable_unit(f"satellite-local:{component_key}") * math.tau
+        for position, node_index in enumerate(ordered_component):
+            local_radius = local_extent * math.sqrt(
+                (position + 0.28) / len(ordered_component)
+            )
+            local_angle = local_phase + position * GOLDEN_ANGLE
+            coordinates[node_index] = (
+                center_x + local_radius * math.cos(local_angle),
+                center_y + local_radius * math.sin(local_angle),
+            )
+
+    # Strong real cross-cluster edges pull their endpoints into subtle bridge
+    # ports, forming filaments without adding synthetic nodes or relations.
+    bridge_x = [0.0] * node_count
+    bridge_y = [0.0] * node_count
+    bridge_mass = [0.0] * node_count
+    for edge_index in sorted(backbone_indexes):
+        source, target, weight, _, strength = edges[edge_index]
+        source_macro = macro_communities[source]
+        target_macro = macro_communities[target]
+        if source_macro == target_macro:
+            continue
+        delta_x = macro_x[target_macro] - macro_x[source_macro]
+        delta_y = macro_y[target_macro] - macro_y[source_macro]
+        distance = math.hypot(delta_x, delta_y) + 1e-9
+        signal = math.log1p(max(weight, 0.0)) + 0.55 * math.log1p(max(strength, 0.0))
+        direction_x = delta_x / distance
+        direction_y = delta_y / distance
+        bridge_x[source] += direction_x * signal
+        bridge_y[source] += direction_y * signal
+        bridge_mass[source] += signal
+        bridge_x[target] -= direction_x * signal
+        bridge_y[target] -= direction_y * signal
+        bridge_mass[target] += signal
+    for node_index, mass in enumerate(bridge_mass):
+        if mass <= 0:
+            continue
+        length = math.hypot(bridge_x[node_index], bridge_y[node_index]) + 1e-9
+        macro_radius = macro_radii[macro_communities[node_index]]
+        shift = macro_radius * (0.045 + 0.095 * math.tanh(mass / 6.0))
+        x, y = coordinates[node_index]
+        coordinates[node_index] = (
+            x + bridge_x[node_index] / length * shift,
+            y + bridge_y[node_index] / length * shift,
+        )
+
+    center_x = sum(coordinates[index][0] for index in main_members) / len(main_members)
+    center_y = sum(coordinates[index][1] for index in main_members) / len(main_members)
+    centered = [
+        (coordinate[0] - center_x, coordinate[1] - center_y)
+        for coordinate in coordinates
+    ]
+    maximum_radius = max(math.hypot(x, y) for x, y in centered)
+    final_scale = 0.965 / max(maximum_radius, 1e-9)
+    coordinates = [
+        (round(x * final_scale, 5), round(y * final_scale, 5))
+        for x, y in centered
+    ]
+    x_values = [coordinate[0] for coordinate in coordinates]
+    y_values = [coordinate[1] for coordinate in coordinates]
+    bounds = {
+        "minX": min(x_values),
+        "maxX": max(x_values),
+        "minY": min(y_values),
+        "maxY": max(y_values),
+    }
+    metrics = layout_metrics(
+        coordinates,
+        nodes,
+        macro_communities,
+        components,
+        edges,
+        backbone_indexes,
+    )
+    metrics.update(
+        {
+            "mode": "clustered-island-disc",
+            "iterations": iterations,
+            "macroCommunityCount": macro_count,
+            "microCommunityCount": len(set(micro_communities)),
+            "realNodeCount": node_count,
+            "syntheticNodeCount": 0,
+        }
+    )
+    return coordinates, bounds, metrics, macro_communities
+
+
+def community_geometry(
+    coordinates: list[tuple[float, float]], members: list[int]
+) -> dict[str, float]:
+    """Summarize a community's rendered covariance envelope."""
+
+    center_x = sum(coordinates[index][0] for index in members) / len(members)
+    center_y = sum(coordinates[index][1] for index in members) / len(members)
+    variance_x = 0.0
+    variance_y = 0.0
+    covariance = 0.0
+    distances = []
+    for index in members:
+        delta_x = coordinates[index][0] - center_x
+        delta_y = coordinates[index][1] - center_y
+        variance_x += delta_x * delta_x
+        variance_y += delta_y * delta_y
+        covariance += delta_x * delta_y
+        distances.append(math.hypot(delta_x, delta_y))
+    variance_x /= len(members)
+    variance_y /= len(members)
+    covariance /= len(members)
+    trace = variance_x + variance_y
+    discriminant = math.sqrt(
+        max(0.0, (variance_x - variance_y) ** 2 + 4 * covariance * covariance)
+    )
+    major = max((trace + discriminant) / 2, 1e-8)
+    minor = max((trace - discriminant) / 2, major * 0.12)
+    return {
+        "x": round(center_x, 5),
+        "y": round(center_y, 5),
+        "radius": round(max(0.025, quantile(distances, 0.92) * 1.08), 5),
+        "angle": round(0.5 * math.atan2(2 * covariance, variance_x - variance_y), 5),
+        "aspect": round(max(1.05, min(2.35, math.sqrt(major / minor))), 4),
+    }
+
+
 def compact_number(value: float, digits: int) -> int | float:
     rounded = round(value, digits)
     if rounded == 0:
@@ -1886,7 +2391,7 @@ def build_payload(
     )
     components = connected_components(len(nodes), edges)
     backbone_indexes = backbone_edge_indexes(len(nodes), edges)
-    coordinates, bounds, layout_summary = continuous_disc_layout(
+    coordinates, bounds, layout_summary, macro_community_ids = clustered_island_layout(
         nodes,
         community_ids,
         degree,
@@ -1897,24 +2402,25 @@ def build_payload(
     )
     component_count = len(components)
     main_component = len(components[0])
+    main_component_set = set(components[0])
 
     community_members: dict[int, list[int]] = defaultdict(list)
-    for node_index, community_id in enumerate(community_ids):
+    for node_index, community_id in enumerate(macro_community_ids):
         community_members[community_id].append(node_index)
 
     community_summary: list[dict[str, Any]] = []
     for community_id in range(len(community_members)):
         members = community_members[community_id]
+        core_members = [index for index in members if index in main_component_set] or members
         top_node = min(
-            members,
+            core_members,
             key=lambda index: (-nodes[index]["r"], -degree[index], nodes[index]["id"]),
         )
         top_language = min(
-            Counter(nodes[index]["lang"] for index in members).items(),
+            Counter(nodes[index]["lang"] for index in core_members).items(),
             key=lambda item: (-item[1], item[0]),
         )[0]
-        center_x = round(sum(coordinates[index][0] for index in members) / len(members), 5)
-        center_y = round(sum(coordinates[index][1] for index in members) / len(members), 5)
+        geometry = community_geometry(coordinates, core_members)
         community_summary.append(
             {
                 "id": community_id,
@@ -1922,8 +2428,10 @@ def build_payload(
                 "label": nodes[top_node]["name"],
                 "lang": top_language,
                 "color": community_color(community_id),
-                "x": center_x,
-                "y": center_y,
+                **geometry,
+                "microCommunityCount": len(
+                    {community_ids[index] for index in members}
+                ),
             }
         )
 
@@ -1953,7 +2461,8 @@ def build_payload(
                 "x": x,
                 "y": y,
                 "r": compact_number(node["r"], 3),
-                "c": community_ids[node_index],
+                "c": macro_community_ids[node_index],
+                "mc": community_ids[node_index],
                 "lang": node["lang"],
                 "areas": {
                     "language": {
@@ -2061,7 +2570,17 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
             json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
             handle.write("\n")
             temporary_path = Path(handle.name)
-        os.replace(temporary_path, path)
+        for attempt in range(8):
+            try:
+                os.replace(temporary_path, path)
+                break
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                # Windows indexers and preview servers can briefly retain a
+                # read handle after a large JSON build. Preserve atomic output
+                # semantics while allowing that transient handle to drain.
+                time.sleep(0.12 * (attempt + 1))
         temporary_path = None
     finally:
         if temporary_path is not None:

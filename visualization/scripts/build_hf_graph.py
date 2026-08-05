@@ -30,10 +30,11 @@ from urllib.request import Request, urlopen
 from build_graph_data import (
     ALGORITHM_VERSION,
     backbone_edge_indexes,
+    clustered_island_layout,
+    community_geometry,
     community_color,
     compact_number,
     connected_components,
-    continuous_disc_layout,
     stable_color,
     stable_unit,
     weighted_label_communities,
@@ -686,7 +687,7 @@ def build_payload(
     )
     components = connected_components(len(nodes), edge_tuples)
     backbone = backbone_edge_indexes(len(nodes), edge_tuples)
-    coordinates, bounds, layout = continuous_disc_layout(
+    coordinates, bounds, layout, macro_communities = clustered_island_layout(
         nodes,
         communities,
         degree,
@@ -697,12 +698,15 @@ def build_payload(
     )
 
     community_members: dict[int, list[int]] = defaultdict(list)
-    for node_index, community_id in enumerate(communities):
+    for node_index, community_id in enumerate(macro_communities):
         community_members[community_id].append(node_index)
     community_summary: list[dict[str, Any]] = []
+    main_component_set = set(components[0])
     for community_id in range(len(community_members)):
         members = community_members[community_id]
-        top = min(members, key=lambda index: (-nodes[index]["r"], nodes[index]["id"]))
+        core_members = [index for index in members if index in main_component_set] or members
+        top = min(core_members, key=lambda index: (-nodes[index]["r"], nodes[index]["id"]))
+        geometry = community_geometry(coordinates, core_members)
         community_summary.append(
             {
                 "id": community_id,
@@ -710,8 +714,8 @@ def build_payload(
                 "label": nodes[top]["label"],
                 "lang": nodes[top]["lang"],
                 "color": community_color(community_id),
-                "x": round(sum(coordinates[index][0] for index in members) / len(members), 5),
-                "y": round(sum(coordinates[index][1] for index in members) / len(members), 5),
+                **geometry,
+                "microCommunityCount": len({communities[index] for index in members}),
             }
         )
 
@@ -742,7 +746,8 @@ def build_payload(
                 "x": coordinates[index][0],
                 "y": coordinates[index][1],
                 "r": compact_number(node["r"], 3),
-                "c": communities[index],
+                "c": macro_communities[index],
+                "mc": communities[index],
                 "degree": degree[index],
             }
         )

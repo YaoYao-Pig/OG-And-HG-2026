@@ -1,0 +1,107 @@
+{
+  "status": "pass",
+  "source_months": {
+    "expected": [
+      202508,
+      202509,
+      202510,
+      202511,
+      202512,
+      202601,
+      202602,
+      202603,
+      202604,
+      202605,
+      202606,
+      202607
+    ],
+    "normalized": [
+      202508,
+      202509,
+      202510,
+      202511,
+      202512,
+      202601,
+      202602,
+      202603,
+      202604,
+      202605,
+      202606,
+      202607
+    ],
+    "global": [
+      202508,
+      202509,
+      202510,
+      202511,
+      202512,
+      202601,
+      202602,
+      202603,
+      202604,
+      202605,
+      202606,
+      202607
+    ]
+  },
+  "source_uniqueness": {
+    "duplicate_ratio_limit": 0.01,
+    "dedupe_strategy": "max(openrank) per source-specific monthly key",
+    "global_openrank": {
+      "rows": 278387,
+      "unique_keys": 278387,
+      "duplicate_rows": 0,
+      "duplicate_ratio": 0.0,
+      "conflicting_duplicate_keys": 0,
+      "conflicting_key_ratio": 0.0
+    },
+    "normalized_community_openrank": {
+      "rows": 3262853,
+      "unique_keys": 3262719,
+      "duplicate_rows": 134,
+      "duplicate_ratio": 4.10684e-05,
+      "conflicting_duplicate_keys": 132,
+      "conflicting_key_ratio": 4.04554e-05
+    }
+  },
+  "edges": {
+    "edge_count": 106650,
+    "endpoint_node_count": 19771,
+    "duplicate_edges": 0,
+    "self_loops": 0,
+    "invalid_rows": 0,
+    "weight": {
+      "min": 0.0045977,
+      "p50": 0.17560691,
+      "p90": 1.36904762,
+      "p99": 6.98155359,
+      "max": 195.36012321
+    },
+    "shared_contributors": {
+      "min": 2,
+      "p50": 3,
+      "p90": 11,
+      "p99": 44,
+      "max": 709
+    }
+  },
+  "nodes": {
+    "node_count": 19771,
+    "duplicate_nodes": 0,
+    "empty_names": 0,
+    "missing_edge_endpoints": 0,
+    "extra_nodes": 0,
+    "invalid_rows": 0,
+    "display_labels": 500,
+    "metadata_missing": 100,
+    "language_unknown": 700,
+    "metadata_coverage_ratio": 0.994942,
+    "language_coverage_ratio": 0.964595,
+    "normalized_vs_global_relative_error": {
+      "p50": 0.04446760594660416,
+      "p90": 0.30959810361975754,
+      "p99": 0.9104814882961455,
+      "max": 1.8242367674846893
+    }
+  }
+}

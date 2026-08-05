@@ -13,6 +13,17 @@ async function readGraph(name) {
 function assertGraphIntegrity(graph) {
   assert.equal(graph.meta.nodeCount, graph.nodes.length);
   assert.equal(graph.meta.edgeCount, graph.edges.length);
+  assert.ok(graph.meta.communities.length >= 12);
+  assert.ok(graph.meta.communities.length <= 18);
+  assert.equal(graph.meta.layout.mode, "clustered-island-disc");
+  assert.equal(graph.meta.layout.realNodeCount, graph.nodes.length);
+  assert.equal(graph.meta.layout.syntheticNodeCount, 0);
+  assert.equal(
+    graph.meta.communities.reduce((sum, community) => sum + community.count, 0),
+    graph.nodes.length,
+  );
+  const communityIds = new Set(graph.meta.communities.map(({ id }) => id));
+  assert.ok(graph.nodes.every((node) => communityIds.has(node.c)));
   for (const edge of graph.edges) {
     assert.ok(Number.isInteger(edge.s) && edge.s >= 0 && edge.s < graph.nodes.length);
     assert.ok(Number.isInteger(edge.t) && edge.t >= 0 && edge.t < graph.nodes.length);
@@ -23,8 +34,8 @@ function assertGraphIntegrity(graph) {
 test("GitHub graph exposes complete language, AI, and domain facets", async () => {
   const graph = await readGraph("graph.json");
   assertGraphIntegrity(graph);
-  assert.equal(graph.nodes.length, 4_243);
-  assert.equal(graph.edges.length, 46_173);
+  assert.equal(graph.nodes.length, 19_771);
+  assert.equal(graph.edges.length, 106_650);
   assert.deepEqual(graph.meta.facetOrder, ["language", "ai", "domain"]);
 
   const expectedDomains = new Set([
@@ -58,11 +69,11 @@ test("GitHub graph exposes complete language, AI, and domain facets", async () =
   const aiFacetCount = graph.meta.facets.ai
     .filter(({ name }) => name !== "Non-AI")
     .reduce((sum, item) => sum + item.count, 0);
-  assert.equal(aiNodes.length, 616);
   assert.equal(aiFacetCount, aiNodes.length);
+  assert.ok(aiNodes.length >= 1_500);
   assert.ok(
     graph.nodes.filter((node) => node.areas.domain.source === "curated").length >=
-      1_300,
+      2_500,
   );
 });
 

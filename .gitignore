@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 output/
+
+# The full final GraphML is a local export artifact (42 MB); the web uses the
+# compact JSON generated from the committed CSV/manifest snapshot instead.
+artifacts/open-galaxy-github-202508-202607-final/graph.graphml

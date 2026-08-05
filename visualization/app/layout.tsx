@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 const title = "OpenGalaxy × HubGalaxy · 开源与 AI 生态星图";
 const description =
-  "探索 GitHub 开源协作与 Hugging Face AI 生态：4,243 个仓库、46,173 条协作关系，以及每日更新的模型、数据集与 Space 星图。";
+  "探索 GitHub 开源协作与 Hugging Face AI 生态：19,771 个仓库、106,650 条协作关系，以及每日更新的模型、数据集与 Space 星图。";
 
 function resolveSiteUrl(): URL {
   const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();

@@ -20,7 +20,7 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-ARTIFACT_NAME = "open-galaxy-github-202508-202607-preview"
+ARTIFACT_NAME = "open-galaxy-github-202508-202607-final"
 
 
 def require_environment(name: str) -> str:

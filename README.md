@@ -6,7 +6,7 @@
 
 仓库同时包含一套可交互的科学图版式 Web Atlas：
 
-- **OpenGalaxy**：4,243 个 GitHub 仓库、46,173 条协作关系，可按语言、AI 子领域和总技术领域观察。
+- **OpenGalaxy**：19,771 个 GitHub 仓库、106,650 条协作关系，可按语言、AI 子领域和总技术领域观察。
 - **HubGalaxy**：从 [`cfahlgren1/hub-stats`](https://huggingface.co/datasets/cfahlgren1/hub-stats) 每日快照抽取的模型、数据集与 Space 生态。
 - **自动发布**：[GitHub Actions workflow](.github/workflows/pages.yml) 在 `main` 更新、手动触发及每日计划任务时构建 GitHub Pages。
 
@@ -14,7 +14,9 @@
 
 ## 仓库内的可直接使用成品
 
-默认 Preview 已经生成并完成完整性校验，周期为 2025-08 至 2026-07：
+默认 Preview 与 Web 使用的近两万节点 Final 均已生成并完成完整性校验，周期为 2025-08 至 2026-07：
+
+- [Final QA](artifacts/open-galaxy-github-202508-202607-final/qa.json) / [Final manifest](artifacts/open-galaxy-github-202508-202607-final/manifest.json)：19,771 个仓库节点、106,650 条边，供 Web 星图使用。
 
 - [graph.graphml](artifacts/open-galaxy-github-202508-202607-preview/graph.graphml)：Graphia 直接打开，包含 4,243 个仓库节点和 46,173 条边。
 - [qa.json](artifacts/open-galaxy-github-202508-202607-preview/qa.json)：月份、重复率、节点、边和端点 QA，状态为 `pass`。

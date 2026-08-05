@@ -45,6 +45,24 @@ type CanvasState = {
   animation: number | null;
 };
 
+type CommunityVisual = {
+  id: number;
+  count: number;
+  x: number;
+  y: number;
+  radius: number;
+  angle: number;
+  aspect: number;
+  representativeIndex: number;
+  color: string;
+  facetCounts: Map<string, number>;
+};
+
+type EdgeLayer = {
+  communityId: number;
+  indices: number[];
+};
+
 type GalaxyCanvasProps = {
   graph: GalaxyGraph;
   selectedIndex: number | null;
@@ -69,6 +87,29 @@ function easeOutQuart(value: number) {
 function shortName(name: string) {
   const segments = name.split("/");
   return segments.at(-1) || name;
+}
+
+function colorWithAlpha(color: string, alpha: number) {
+  const value = color.trim();
+  if (/^#[\da-f]{3}$/i.test(value)) {
+    const [r, g, b] = value
+      .slice(1)
+      .split("")
+      .map((part) => Number.parseInt(part + part, 16));
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  if (/^#[\da-f]{6}$/i.test(value)) {
+    return `rgba(${Number.parseInt(value.slice(1, 3), 16)},${Number.parseInt(
+      value.slice(3, 5),
+      16,
+    )},${Number.parseInt(value.slice(5, 7), 16)},${alpha})`;
+  }
+  return `rgba(180,188,194,${alpha})`;
+}
+
+function stableUnit(seed: number, salt: number) {
+  const value = Math.sin(seed * 12.9898 + salt * 78.233) * 43758.5453;
+  return value - Math.floor(value);
 }
 
 export function GalaxyCanvas({
@@ -160,26 +201,181 @@ export function GalaxyCanvas({
     [facet, graph],
   );
 
+  const nodeVisuals = useMemo(() => {
+    const scores = graph.nodes.map(
+      (node) =>
+        Math.log1p(Math.max(node.r, 0)) * 1.55 +
+        Math.log1p(Math.max(node.degree, 0)) * 0.9 +
+        Math.log1p(Math.max(node.contributors, 0)) * 0.22,
+    );
+    const rankedIndices = scores
+      .map((score, index) => ({ score, index }))
+      .sort((a, b) => b.score - a.score)
+      .map(({ index }) => index);
+    const tiers = new Uint8Array(graph.nodes.length);
+    const starEnd = Math.min(
+      graph.nodes.length,
+      Math.max(80, Math.ceil(graph.nodes.length * 0.05)),
+    );
+    const coreEnd = Math.min(
+      starEnd,
+      Math.max(20, Math.ceil(graph.nodes.length * 0.006)),
+    );
+    const landmarkEnd = Math.min(
+      coreEnd,
+      Math.max(12, Math.ceil(graph.nodes.length * 0.0014)),
+    );
+    rankedIndices.forEach((index, rank) => {
+      tiers[index] = rank < landmarkEnd ? 3 : rank < coreEnd ? 2 : rank < starEnd ? 1 : 0;
+    });
+    return {
+      scores,
+      tiers,
+      rankedIndices,
+      starIndices: rankedIndices.slice(0, starEnd),
+      landmarkIndices: rankedIndices.slice(0, Math.min(48, landmarkEnd)),
+    };
+  }, [graph]);
+
+  const communityVisuals = useMemo(() => {
+    type Accumulator = {
+      id: number;
+      indices: number[];
+      sumX: number;
+      sumY: number;
+      facetCounts: Map<string, number>;
+      representativeIndex: number;
+    };
+    const accumulators = new Map<number, Accumulator>();
+    graph.nodes.forEach((node, index) => {
+      let accumulator = accumulators.get(node.c);
+      if (!accumulator) {
+        accumulator = {
+          id: node.c,
+          indices: [],
+          sumX: 0,
+          sumY: 0,
+          facetCounts: new Map(),
+          representativeIndex: index,
+        };
+        accumulators.set(node.c, accumulator);
+      }
+      accumulator.indices.push(index);
+      accumulator.sumX += node.x;
+      accumulator.sumY += node.y;
+      const value = nodeFacetValue(node, facet);
+      accumulator.facetCounts.set(value, (accumulator.facetCounts.get(value) ?? 0) + 1);
+      if (
+        nodeVisuals.scores[index] >
+        nodeVisuals.scores[accumulator.representativeIndex]
+      ) {
+        accumulator.representativeIndex = index;
+      }
+    });
+
+    const metaById = new Map(
+      (graph.meta.communities ?? []).map((community) => [community.id, community]),
+    );
+    const visuals: CommunityVisual[] = [];
+    for (const accumulator of accumulators.values()) {
+      const meta = metaById.get(accumulator.id);
+      const x = meta?.x ?? accumulator.sumX / accumulator.indices.length;
+      const y = meta?.y ?? accumulator.sumY / accumulator.indices.length;
+      let varianceX = 0;
+      let varianceY = 0;
+      let covariance = 0;
+      for (const index of accumulator.indices) {
+        const dx = graph.nodes[index].x - x;
+        const dy = graph.nodes[index].y - y;
+        varianceX += dx * dx;
+        varianceY += dy * dy;
+        covariance += dx * dy;
+      }
+      varianceX /= Math.max(accumulator.indices.length, 1);
+      varianceY /= Math.max(accumulator.indices.length, 1);
+      covariance /= Math.max(accumulator.indices.length, 1);
+      const trace = varianceX + varianceY;
+      const discriminant = Math.sqrt(
+        Math.max(0, (varianceX - varianceY) ** 2 + 4 * covariance ** 2),
+      );
+      const major = Math.max((trace + discriminant) / 2, 0.00001);
+      const minor = Math.max((trace - discriminant) / 2, major * 0.12);
+      const dominantFacet = [...accumulator.facetCounts.entries()].sort(
+        (a, b) => b[1] - a[1],
+      )[0]?.[0];
+      visuals.push({
+        id: accumulator.id,
+        count: accumulator.indices.length,
+        x,
+        y,
+        radius:
+          meta?.radius ?? clamp(Math.sqrt(major) * 2.7, 0.035, 0.38),
+        angle:
+          meta?.angle ?? 0.5 * Math.atan2(2 * covariance, varianceX - varianceY),
+        aspect:
+          meta?.aspect ?? clamp(Math.sqrt(major / minor), 1.05, 2.35),
+        representativeIndex: accumulator.representativeIndex,
+        color: facetColors.get(dominantFacet) ?? meta?.color ?? "#939ca2",
+        facetCounts: accumulator.facetCounts,
+      });
+    }
+    return visuals.sort((a, b) => b.count - a.count);
+  }, [facet, facetColors, graph, nodeVisuals.scores]);
+
   const annotationIndices = useMemo(() => {
-    const candidates = graph.nodes
-      .map((node, index) => ({ node, index, angle: Math.atan2(node.y, node.x) }))
-      .filter(({ node }) => Boolean(node.label))
-      .sort((a, b) => b.node.r - a.node.r);
+    const candidates = communityVisuals
+      .map((community) => ({
+        index: community.representativeIndex,
+        angle: Math.atan2(community.y, community.x),
+        score: community.count * (0.78 + Math.hypot(community.x, community.y) * 0.65),
+      }))
+      .sort((a, b) => b.score - a.score);
     const chosen: typeof candidates = [];
-    const usedFacetValues = new Set<string>();
     for (const candidate of candidates) {
-      if (chosen.length >= 14) break;
+      if (chosen.length >= 16) break;
       const separated = chosen.every((item) => {
         const delta = Math.abs(candidate.angle - item.angle);
-        return Math.min(delta, Math.PI * 2 - delta) > 0.23;
+        return Math.min(delta, Math.PI * 2 - delta) > 0.2;
       });
-      const value = nodeFacetValue(candidate.node, facet);
-      if (!separated || usedFacetValues.has(value)) continue;
+      if (!separated) continue;
       chosen.push(candidate);
-      usedFacetValues.add(value);
     }
     return chosen.map(({ index }) => index);
-  }, [facet, graph]);
+  }, [communityVisuals]);
+
+  const edgeLayers = useMemo(() => {
+    const within = new Map<number, number[]>();
+    const cross: number[] = [];
+    graph.edges.forEach((edge, edgeIndex) => {
+      const sourceCommunity = graph.nodes[edge.s]?.c;
+      const targetCommunity = graph.nodes[edge.t]?.c;
+      if (sourceCommunity === targetCommunity && sourceCommunity !== undefined) {
+        const indices = within.get(sourceCommunity) ?? [];
+        indices.push(edgeIndex);
+        within.set(sourceCommunity, indices);
+      } else {
+        cross.push(edgeIndex);
+      }
+    });
+    const withinLayers: EdgeLayer[] = [...within.entries()]
+      .map(([communityId, indices]) => ({
+        communityId,
+        indices,
+      }))
+      .sort((a, b) => b.indices.length - a.indices.length);
+    const skeleton = graph.edges
+      .map((edge, index) => ({
+        index,
+        score:
+          (edge.b === 1 ? 5 : 0) +
+          Math.log1p(Math.max(edge.strength, 0)) +
+          Math.log1p(Math.max(edge.w, 0)) * 0.25,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.min(2_400, Math.max(720, Math.ceil(graph.nodes.length * 0.1))))
+      .map(({ index }) => index);
+    return { cross, withinLayers, skeleton };
+  }, [graph]);
 
   const edgesByNode = useMemo(() => {
     const result = Array.from({ length: graph.nodes.length }, () => [] as number[]);
@@ -228,10 +424,36 @@ export function GalaxyCanvas({
       y: (y - state.camera.y) * state.baseScale * state.camera.zoom + state.plotY,
     });
 
+    const screenX = new Float32Array(graph.nodes.length);
+    const screenY = new Float32Array(graph.nodes.length);
+    const screenInPlot = new Uint8Array(graph.nodes.length);
+    const visibleMask = new Uint8Array(graph.nodes.length);
+    const communityColorById = new Map(
+      communityVisuals.map((community) => [community.id, community.color]),
+    );
+    const glowSprites = new Map<string, HTMLCanvasElement>();
+    const glowSprite = (color: string) => {
+      const cached = glowSprites.get(color);
+      if (cached) return cached;
+      const sprite = document.createElement("canvas");
+      sprite.width = 128;
+      sprite.height = 128;
+      const spriteContext = sprite.getContext("2d");
+      if (spriteContext) {
+        const gradient = spriteContext.createRadialGradient(64, 64, 0, 64, 64, 64);
+        gradient.addColorStop(0, colorWithAlpha(color, 0.82));
+        gradient.addColorStop(0.28, colorWithAlpha(color, 0.42));
+        gradient.addColorStop(0.68, colorWithAlpha(color, 0.1));
+        gradient.addColorStop(1, colorWithAlpha(color, 0));
+        spriteContext.fillStyle = gradient;
+        spriteContext.fillRect(0, 0, 128, 128);
+      }
+      glowSprites.set(color, sprite);
+      return sprite;
+    };
+
     const nodeVisible = (index: number) =>
-      propsRef.current.facetValue === null ||
-      nodeFacetValue(graph.nodes[index], propsRef.current.facet) ===
-        propsRef.current.facetValue;
+      visibleMask[index] === 1;
 
     const edgeVisible = (edgeIndex: number) => {
       const edge = graph.edges[edgeIndex];
@@ -251,7 +473,8 @@ export function GalaxyCanvas({
     const drawCallout = (index: number, emphasized = false) => {
       const node = graph.nodes[index];
       if (!node) return;
-      const point = worldToScreen(node.x, node.y);
+      if (!emphasized && !nodeVisible(index)) return;
+      const point = { x: screenX[index], y: screenY[index] };
       if (!inPlot(point.x, point.y, 5)) return;
       const angle = Math.atan2(point.y - state.plotY, point.x - state.plotX);
       const directionX = Math.cos(angle);
@@ -301,9 +524,39 @@ export function GalaxyCanvas({
       context.restore();
     };
 
+    let lowDetailUntil = 0;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
     const draw = () => {
       const { width, height, dpr, plotX, plotY, plotRadius, camera } = state;
-      const focused = propsRef.current.selectedIndex ?? propsRef.current.hoveredIndex;
+      const requestedFocus =
+        propsRef.current.selectedIndex ?? propsRef.current.hoveredIndex;
+      const lowDetail =
+        state.dragging ||
+        state.animation !== null ||
+        performance.now() < lowDetailUntil;
+      const cameraScale = state.baseScale * camera.zoom;
+      const plotMarginSquared = (plotRadius + 24) ** 2;
+      for (let index = 0; index < graph.nodes.length; index += 1) {
+        const node = graph.nodes[index];
+        const x = (node.x - camera.x) * cameraScale + plotX;
+        const y = (node.y - camera.y) * cameraScale + plotY;
+        screenX[index] = x;
+        screenY[index] = y;
+        const deltaX = x - plotX;
+        const deltaY = y - plotY;
+        screenInPlot[index] =
+          deltaX * deltaX + deltaY * deltaY <= plotMarginSquared ? 1 : 0;
+        visibleMask[index] =
+          propsRef.current.facetValue === null ||
+          nodeFacetValue(node, propsRef.current.facet) === propsRef.current.facetValue
+            ? 1
+            : 0;
+      }
+      const focused =
+        requestedFocus !== null && visibleMask[requestedFocus] === 1
+          ? requestedFocus
+          : null;
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
       context.clearRect(0, 0, width, height);
 
@@ -328,90 +581,267 @@ export function GalaxyCanvas({
       context.fillStyle = vignette;
       context.fillRect(plotX - plotRadius, plotY - plotRadius, plotRadius * 2, plotRadius * 2);
 
-      context.beginPath();
-      for (let edgeIndex = 0; edgeIndex < graph.edges.length; edgeIndex += 1) {
-        if (!edgeVisible(edgeIndex)) continue;
-        const edge = graph.edges[edgeIndex];
-        const sourceVisible = nodeVisible(edge.s);
-        const targetVisible = nodeVisible(edge.t);
-        if (propsRef.current.facetValue !== null && (!sourceVisible || !targetVisible)) continue;
-        const source = graph.nodes[edge.s];
-        const target = graph.nodes[edge.t];
-        const a = worldToScreen(source.x, source.y);
-        const b = worldToScreen(target.x, target.y);
-        if (!inPlot(a.x, a.y, 20) && !inPlot(b.x, b.y, 20)) continue;
-        context.moveTo(a.x, a.y);
-        context.lineTo(b.x, b.y);
+      const nebulaFade = clamp((2.4 - camera.zoom) / 1.1, 0, 1);
+      const largestCommunity = communityVisuals[0]?.count ?? 1;
+      context.globalCompositeOperation = "source-over";
+      for (const community of communityVisuals) {
+        if (nebulaFade <= 0) break;
+        const point = worldToScreen(community.x, community.y);
+        const activeCount = propsRef.current.facetValue
+          ? community.facetCounts.get(propsRef.current.facetValue) ?? 0
+          : community.count;
+        if (activeCount === 0 && propsRef.current.facetValue !== null) continue;
+        const activeShare = clamp(activeCount / Math.max(community.count, 1), 0.08, 1);
+        const nebulaColor = propsRef.current.facetValue
+          ? facetColors.get(propsRef.current.facetValue) ?? community.color
+          : community.color;
+        const baseRadius = clamp(
+          community.radius * state.baseScale * camera.zoom * 1.28,
+          12,
+          plotRadius * 0.46,
+        );
+        if (
+          Math.hypot(point.x - plotX, point.y - plotY) >
+          plotRadius + baseRadius * community.aspect
+        ) {
+          continue;
+        }
+        for (let lobe = 0; lobe < 3; lobe += 1) {
+          const phase = stableUnit(community.id + 1, lobe + 11) * Math.PI * 2;
+          const offset = baseRadius * (lobe === 0 ? 0 : 0.12 + stableUnit(community.id, lobe) * 0.08);
+          const lobeRadius = baseRadius * (lobe === 0 ? 0.88 : 0.56 + stableUnit(community.id, lobe + 5) * 0.2);
+          const alpha =
+            (propsRef.current.facetValue === null ? 0.032 : 0.045) *
+            activeShare *
+            Math.sqrt(community.count / largestCommunity) *
+            nebulaFade *
+            (lobe === 0 ? 1 : 0.58);
+          context.save();
+          context.translate(
+            point.x + Math.cos(phase) * offset,
+            point.y + Math.sin(phase) * offset,
+          );
+          context.rotate(community.angle + (lobe - 1) * 0.09);
+          const aspect = Math.sqrt(community.aspect) * (lobe === 2 ? 0.92 : 1);
+          context.globalAlpha = alpha;
+          const sprite = glowSprite(nebulaColor);
+          context.drawImage(
+            sprite,
+            -lobeRadius * aspect,
+            -lobeRadius / aspect,
+            lobeRadius * aspect * 2,
+            (lobeRadius / aspect) * 2,
+          );
+          context.restore();
+        }
       }
-      context.strokeStyle =
-        propsRef.current.facetValue === null
-          ? propsRef.current.density === "all"
-            ? "rgba(215,220,224,.047)"
-            : "rgba(215,220,224,.075)"
-          : "rgba(225,230,233,.14)";
-      context.lineWidth = propsRef.current.density === "all" ? 0.34 : 0.46;
-      context.stroke();
+      context.globalAlpha = 1;
 
-      context.beginPath();
-      for (let edgeIndex = 0; edgeIndex < Math.min(500, graph.edges.length); edgeIndex += 1) {
-        if (!edgeVisible(edgeIndex)) continue;
-        const edge = graph.edges[edgeIndex];
-        if (propsRef.current.facetValue !== null && (!nodeVisible(edge.s) || !nodeVisible(edge.t))) continue;
-        const source = graph.nodes[edge.s];
-        const target = graph.nodes[edge.t];
-        const a = worldToScreen(source.x, source.y);
-        const b = worldToScreen(target.x, target.y);
-        context.moveTo(a.x, a.y);
-        context.lineTo(b.x, b.y);
+      const strokeEdges = (
+        indices: number[],
+        strokeStyle: string,
+        lineWidth: number,
+        batchSize = 0,
+      ) => {
+        context.strokeStyle = strokeStyle;
+        context.lineWidth = lineWidth;
+        context.beginPath();
+        let segmentCount = 0;
+        const flush = () => {
+          if (segmentCount === 0) return;
+          context.stroke();
+          context.beginPath();
+          segmentCount = 0;
+        };
+        for (const edgeIndex of indices) {
+          if (!edgeVisible(edgeIndex)) continue;
+          const edge = graph.edges[edgeIndex];
+          if (
+            propsRef.current.facetValue !== null &&
+            (!nodeVisible(edge.s) || !nodeVisible(edge.t))
+          ) {
+            continue;
+          }
+          const sourceX = screenX[edge.s];
+          const sourceY = screenY[edge.s];
+          const targetX = screenX[edge.t];
+          const targetY = screenY[edge.t];
+          if (screenInPlot[edge.s] === 0 && screenInPlot[edge.t] === 0) {
+            const deltaX = targetX - sourceX;
+            const deltaY = targetY - sourceY;
+            const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+            const projection =
+              lengthSquared > 0
+                ? clamp(
+                    ((plotX - sourceX) * deltaX + (plotY - sourceY) * deltaY) /
+                      lengthSquared,
+                    0,
+                    1,
+                  )
+                : 0;
+            const closestX = sourceX + deltaX * projection - plotX;
+            const closestY = sourceY + deltaY * projection - plotY;
+            if (closestX * closestX + closestY * closestY > (plotRadius + 2) ** 2) {
+              continue;
+            }
+          }
+          context.moveTo(sourceX, sourceY);
+          context.lineTo(targetX, targetY);
+          segmentCount += 1;
+          if (batchSize > 0 && segmentCount >= batchSize) flush();
+        }
+        flush();
+      };
+
+      const edgeAlphaScale = clamp(
+        Math.sqrt(46_000 / Math.max(graph.edges.length, 1)),
+        0.5,
+        1,
+      );
+      context.globalCompositeOperation = "source-over";
+      if (!lowDetail) {
+        strokeEdges(
+          edgeLayers.cross,
+          propsRef.current.facetValue === null
+            ? `rgba(203,211,216,${0.026 * edgeAlphaScale})`
+            : `rgba(220,226,230,${0.075 * edgeAlphaScale})`,
+          propsRef.current.density === "all" ? 0.28 : 0.42,
+        );
       }
-      context.strokeStyle = "rgba(245,245,242,.14)";
-      context.lineWidth = 0.48;
-      context.stroke();
+
+      context.globalCompositeOperation = "lighter";
+      if (!lowDetail) {
+        for (const layer of edgeLayers.withinLayers) {
+          strokeEdges(
+            layer.indices,
+            colorWithAlpha(
+              (propsRef.current.facetValue
+                ? facetColors.get(propsRef.current.facetValue)
+                : undefined) ??
+                communityColorById.get(layer.communityId) ??
+                "#aab0b4",
+              (propsRef.current.facetValue === null
+                ? propsRef.current.density === "all"
+                  ? 0.023
+                  : 0.038
+                : 0.064) * edgeAlphaScale,
+            ),
+            propsRef.current.density === "all" ? 0.32 : 0.43,
+            220,
+          );
+        }
+      }
+
+      context.globalCompositeOperation = "source-over";
+      strokeEdges(
+        edgeLayers.skeleton,
+        propsRef.current.facetValue === null
+          ? `rgba(238,241,242,${0.095 * edgeAlphaScale})`
+          : `rgba(246,247,247,${0.18 * edgeAlphaScale})`,
+        propsRef.current.density === "all" ? 0.48 : 0.62,
+      );
+
+      const zoomRadius = clamp(Math.pow(camera.zoom, 0.12), 0.9, 1.34);
+      const maxScore = Math.max(nodeVisuals.scores[nodeVisuals.rankedIndices[0] ?? 0] ?? 1, 1);
+      const nodeRadius = (index: number) => {
+        const tier = nodeVisuals.tiers[index];
+        const scoreShare = clamp(nodeVisuals.scores[index] / maxScore, 0, 1);
+        if (tier === 3) return (3.2 + scoreShare * 3.1) * zoomRadius;
+        if (tier === 2) return (1.75 + scoreShare * 2.05) * zoomRadius;
+        if (tier === 1) return (0.82 + scoreShare * 1.35) * zoomRadius;
+        return clamp(0.31 + Math.log1p(graph.nodes[index].degree) * 0.045, 0.35, 0.72) * zoomRadius;
+      };
+
+      context.globalCompositeOperation = "lighter";
+      for (const index of [...nodeVisuals.landmarkIndices].reverse()) {
+        if (!nodeVisible(index)) continue;
+        if (screenInPlot[index] === 0) continue;
+        const radius = nodeRadius(index);
+        const haloRadius = radius * 3.2 + 5;
+        context.globalAlpha = 0.2;
+        const sprite = glowSprite(nodeColor(index));
+        context.drawImage(
+          sprite,
+          screenX[index] - haloRadius,
+          screenY[index] - haloRadius,
+          haloRadius * 2,
+          haloRadius * 2,
+        );
+      }
 
       for (let index = graph.nodes.length - 1; index >= 0; index -= 1) {
+        if (nodeVisuals.tiers[index] !== 0) continue;
         const node = graph.nodes[index];
-        const point = worldToScreen(node.x, node.y);
-        if (!inPlot(point.x, point.y, 8)) continue;
+        if (screenInPlot[index] === 0) continue;
         const visible = nodeVisible(index);
-        const radius = clamp(
-          0.38 + Math.log1p(Math.max(node.r, 0)) * 0.2 + Math.log1p(node.degree) * 0.018,
-          0.5,
-          3.15,
-        ) * clamp(Math.pow(camera.zoom, 0.12), 0.9, 1.3);
         const facetRank = facetOrder.get(nodeFacetValue(node, facet)) ?? 99;
-        context.globalAlpha = visible ? (facetRank < 99 ? 0.82 : 0.5) : 0.035;
+        const size = nodeRadius(index) * 1.65;
+        context.globalAlpha = visible ? (facetRank < 99 ? 0.72 : 0.46) : 0.024;
+        context.fillStyle = nodeColor(index);
+        context.fillRect(screenX[index] - size / 2, screenY[index] - size / 2, size, size);
+      }
+
+      for (const index of [...nodeVisuals.starIndices].reverse()) {
+        const tier = nodeVisuals.tiers[index];
+        const node = graph.nodes[index];
+        if (screenInPlot[index] === 0) continue;
+        const visible = nodeVisible(index);
+        const facetRank = facetOrder.get(nodeFacetValue(node, facet)) ?? 99;
+        context.globalAlpha = visible
+          ? tier >= 2
+            ? 0.94
+            : facetRank < 99
+              ? 0.84
+              : 0.58
+          : 0.03;
         context.beginPath();
-        context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        context.arc(screenX[index], screenY[index], nodeRadius(index), 0, Math.PI * 2);
         context.fillStyle = nodeColor(index);
         context.fill();
       }
       context.globalAlpha = 1;
+      context.globalCompositeOperation = "source-over";
+
+      for (const index of nodeVisuals.landmarkIndices.slice(0, 18)) {
+        if (!nodeVisible(index)) continue;
+        if (screenInPlot[index] === 0) continue;
+        const radius = nodeRadius(index);
+        context.beginPath();
+        context.arc(screenX[index], screenY[index], radius + 3.8, 0, Math.PI * 2);
+        context.strokeStyle = "rgba(238,241,242,.28)";
+        context.lineWidth = 0.55;
+        context.stroke();
+        context.beginPath();
+        context.arc(screenX[index], screenY[index], radius + 7.2, 0, Math.PI * 2);
+        context.strokeStyle = "rgba(220,225,228,.12)";
+        context.lineWidth = 0.45;
+        context.stroke();
+      }
 
       if (focused !== null) {
-        context.fillStyle = "rgba(0,0,0,.7)";
+        context.fillStyle =
+          propsRef.current.selectedIndex !== null
+            ? "rgba(0,0,0,.59)"
+            : "rgba(0,0,0,.29)";
         context.fillRect(plotX - plotRadius, plotY - plotRadius, plotRadius * 2, plotRadius * 2);
         const connected = new Set<number>([focused]);
         for (const edgeIndex of edgesByNode[focused] ?? []) {
+          if (!edgeVisible(edgeIndex)) continue;
           const edge = graph.edges[edgeIndex];
-          const source = graph.nodes[edge.s];
-          const target = graph.nodes[edge.t];
-          const a = worldToScreen(source.x, source.y);
-          const b = worldToScreen(target.x, target.y);
+          if (!nodeVisible(edge.s) || !nodeVisible(edge.t)) continue;
           connected.add(edge.s);
           connected.add(edge.t);
           context.beginPath();
-          context.moveTo(a.x, a.y);
-          context.lineTo(b.x, b.y);
+          context.moveTo(screenX[edge.s], screenY[edge.s]);
+          context.lineTo(screenX[edge.t], screenY[edge.t]);
           context.strokeStyle = "rgba(236,239,241,.55)";
           context.lineWidth = clamp(0.55 + Math.log1p(edge.strength) * 0.16, 0.6, 1.6);
           context.stroke();
         }
         for (const index of connected) {
-          const node = graph.nodes[index];
-          const point = worldToScreen(node.x, node.y);
           const isFocus = index === focused;
           context.beginPath();
-          context.arc(point.x, point.y, isFocus ? 4 : 1.6, 0, Math.PI * 2);
+          context.arc(screenX[index], screenY[index], isFocus ? 4 : 1.6, 0, Math.PI * 2);
           context.fillStyle = isFocus ? "#ffffff" : nodeColor(index);
           context.globalAlpha = isFocus ? 1 : 0.82;
           context.fill();
@@ -432,7 +862,15 @@ export function GalaxyCanvas({
       if (focused !== null) drawCallout(focused, true);
     };
 
-    requestDrawRef.current = draw;
+    let scheduledDraw: number | null = null;
+    const scheduleDraw = () => {
+      if (scheduledDraw !== null) return;
+      scheduledDraw = requestAnimationFrame(() => {
+        scheduledDraw = null;
+        draw();
+      });
+    };
+    requestDrawRef.current = scheduleDraw;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -460,6 +898,7 @@ export function GalaxyCanvas({
 
     const animateTo = (target: Camera, duration = 560) => {
       if (state.animation !== null) cancelAnimationFrame(state.animation);
+      state.animation = null;
       const from = { ...state.camera };
       const start = performance.now();
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -472,7 +911,7 @@ export function GalaxyCanvas({
           y: from.y + (target.y - from.y) * eased,
           zoom: from.zoom + (target.zoom - from.zoom) * eased,
         };
-        draw();
+        scheduleDraw();
         if (progress < 1) state.animation = requestAnimationFrame(frame);
         else state.animation = null;
       };
@@ -486,14 +925,14 @@ export function GalaxyCanvas({
       const y = clientY - rect.top;
       if (!inPlot(x, y, 8)) return null;
       let bestIndex: number | null = null;
-      let bestDistance = 13;
+      let bestDistanceSquared = 13 ** 2;
       for (let index = 0; index < graph.nodes.length; index += 1) {
         if (!nodeVisible(index)) continue;
-        const node = graph.nodes[index];
-        const point = worldToScreen(node.x, node.y);
-        const distance = Math.hypot(point.x - x, point.y - y);
-        if (distance < bestDistance) {
-          bestDistance = distance;
+        const deltaX = screenX[index] - x;
+        const deltaY = screenY[index] - y;
+        const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+        if (distanceSquared < bestDistanceSquared) {
+          bestDistanceSquared = distanceSquared;
           bestIndex = index;
         }
       }
@@ -518,7 +957,7 @@ export function GalaxyCanvas({
         state.camera.y -= deltaY / (state.baseScale * state.camera.zoom);
         state.lastX = event.clientX;
         state.lastY = event.clientY;
-        draw();
+        scheduleDraw();
         return;
       }
       propsRef.current.onHover(findNearest(event.clientX, event.clientY));
@@ -534,6 +973,7 @@ export function GalaxyCanvas({
       } catch {
         // Browser already released this pointer.
       }
+      scheduleDraw();
     };
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -546,7 +986,13 @@ export function GalaxyCanvas({
       state.camera.zoom = zoom;
       state.camera.x = worldX - (x - state.plotX) / (state.baseScale * zoom);
       state.camera.y = worldY - (y - state.plotY) / (state.baseScale * zoom);
-      draw();
+      lowDetailUntil = performance.now() + 90;
+      if (settleTimer !== null) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        scheduleDraw();
+      }, 100);
+      scheduleDraw();
     };
     const doubleClick = (event: MouseEvent) => {
       const index = findNearest(event.clientX, event.clientY);
@@ -580,8 +1026,27 @@ export function GalaxyCanvas({
       canvas.removeEventListener("wheel", wheel);
       canvas.removeEventListener("dblclick", doubleClick);
       if (state.animation !== null) cancelAnimationFrame(state.animation);
+      if (scheduledDraw !== null) cancelAnimationFrame(scheduledDraw);
+      if (settleTimer !== null) clearTimeout(settleTimer);
+      if (requestDrawRef.current === scheduleDraw) {
+        requestDrawRef.current = () => undefined;
+      }
+      if (animateToRef.current === animateTo) {
+        animateToRef.current = () => undefined;
+      }
     };
-  }, [annotationIndices, bounds, edgesByNode, facet, facetColors, facetOrder, graph]);
+  }, [
+    annotationIndices,
+    bounds,
+    communityVisuals,
+    edgeLayers,
+    edgesByNode,
+    facet,
+    facetColors,
+    facetOrder,
+    graph,
+    nodeVisuals,
+  ]);
 
   useEffect(() => {
     const state = stateRef.current;
