@@ -1,0 +1,107 @@
+{
+  "status": "pass",
+  "source_months": {
+    "expected": [
+      202508,
+      202509,
+      202510,
+      202511,
+      202512,
+      202601,
+      202602,
+      202603,
+      202604,
+      202605,
+      202606,
+      202607
+    ],
+    "normalized": [
+      202508,
+      202509,
+      202510,
+      202511,
+      202512,
+      202601,
+      202602,
+      202603,
+      202604,
+      202605,
+      202606,
+      202607
+    ],
+    "global": [
+      202508,
+      202509,
+      202510,
+      202511,
+      202512,
+      202601,
+      202602,
+      202603,
+      202604,
+      202605,
+      202606,
+      202607
+    ]
+  },
+  "source_uniqueness": {
+    "duplicate_ratio_limit": 0.01,
+    "dedupe_strategy": "max(openrank) per source-specific monthly key",
+    "global_openrank": {
+      "rows": 56886,
+      "unique_keys": 56886,
+      "duplicate_rows": 0,
+      "duplicate_ratio": 0.0,
+      "conflicting_duplicate_keys": 0,
+      "conflicting_key_ratio": 0.0
+    },
+    "normalized_community_openrank": {
+      "rows": 1866620,
+      "unique_keys": 1866488,
+      "duplicate_rows": 132,
+      "duplicate_ratio": 7.07161e-05,
+      "conflicting_duplicate_keys": 130,
+      "conflicting_key_ratio": 6.96446e-05
+    }
+  },
+  "edges": {
+    "edge_count": 46173,
+    "endpoint_node_count": 4243,
+    "duplicate_edges": 0,
+    "self_loops": 0,
+    "invalid_rows": 0,
+    "weight": {
+      "min": 0.0045977,
+      "p50": 0.2,
+      "p90": 1.4979738,
+      "p99": 9.43473944,
+      "max": 195.36012321
+    },
+    "shared_contributors": {
+      "min": 2,
+      "p50": 3,
+      "p90": 11,
+      "p99": 57,
+      "max": 709
+    }
+  },
+  "nodes": {
+    "node_count": 4243,
+    "duplicate_nodes": 0,
+    "empty_names": 0,
+    "missing_edge_endpoints": 0,
+    "extra_nodes": 0,
+    "invalid_rows": 0,
+    "display_labels": 150,
+    "metadata_missing": 8,
+    "language_unknown": 98,
+    "metadata_coverage_ratio": 0.998115,
+    "language_coverage_ratio": 0.976903,
+    "normalized_vs_global_relative_error": {
+      "p50": 0.07456694336093436,
+      "p90": 0.5601644880798621,
+      "p99": 0.9672708352862686,
+      "max": 0.9954939467016496
+    }
+  }
+}

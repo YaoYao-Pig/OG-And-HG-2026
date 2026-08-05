@@ -1,0 +1,2 @@
+* text=auto eol=lf
+artifacts/**/nodes.csv -text !eol whitespace=cr-at-eol

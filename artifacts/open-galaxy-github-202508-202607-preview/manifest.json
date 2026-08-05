@@ -1,0 +1,74 @@
+{
+  "schema_version": 2,
+  "tool_version": "1.2.0",
+  "run_id": "f69160c92a77",
+  "generated_at_utc": "2026-08-05T05:23:22.259411+00:00",
+  "clickhouse": {
+    "version": "25.3.6.1",
+    "database": "opensource",
+    "readonly": true,
+    "normalized_latest_month": 202607,
+    "global_latest_month": 202607,
+    "server_previous_complete_month": 202607
+  },
+  "parameters": {
+    "preset": "preview",
+    "platform": "GitHub",
+    "start_yyyymm": 202508,
+    "end_yyyymm": 202607,
+    "months": 12,
+    "top_repos": 5000,
+    "min_shared": 2,
+    "max_actor_degree": 30,
+    "max_edges_per_node": 30,
+    "label_count": 150,
+    "max_result_rows": 200000,
+    "max_threads": 4,
+    "max_execution_time": 300
+  },
+  "semantics": {
+    "node": "repository",
+    "edge": "two repositories sharing at least the configured number of known non-bot contributors",
+    "weight": "sum of annual-degree-corrected actor mass; each eligible actor distributes total mass 1 across all annual repository pairs",
+    "collaboration_strength": "sum(weight_per_actor * sqrt(contribution_a * contribution_b))",
+    "fork_filter": "known forks are excluded; missing repo metadata is retained",
+    "source_deduplication": "global_openrank uses max(openrank) per (repo_id, month); normalized_community_openrank uses max(openrank) per (repo_id, actor_id, month)",
+    "source_tables": [
+      "global_openrank",
+      "normalized_community_openrank",
+      "repo_info"
+    ]
+  },
+  "outputs": {
+    "edges.csv": {
+      "bytes": 2814777,
+      "sha256": "91f19b08b0f0958ad271a6cd22cef8b4e4586cc9bda50824c99d3d80abd433c1",
+      "rows": 46173,
+      "query_seconds": 6.384
+    },
+    "nodes.csv": {
+      "bytes": 1221147,
+      "sha256": "0c6c977160ceb7d830e9ba788608bcdf8dd5101603b6f5ad20c063e11362df09",
+      "rows": 4243,
+      "query_seconds": 15.283
+    },
+    "graph.graphml": {
+      "bytes": 14728556,
+      "sha256": "ef4e567ffe00fc63ca3aa41815f9f44e9304a5a4245573f4602fee3e39f65e84",
+      "nodes": 4243,
+      "edges": 46173
+    },
+    "qa.json": {
+      "sha256": "16b54b0d712453a429288bb97c3235e4e316fc6a336f4a964d0016742b78d8f7"
+    },
+    "queries/edges.sql": {
+      "sha256": "cc3b9175db7b68b252cda0f23fbfd313504e5fc383b4d4c7e18c236dd7971ccc"
+    },
+    "queries/nodes.sql": {
+      "sha256": "72f51284777c3899db83fb3dd19af850024d72f3bcf20cc133017454e5ec170a"
+    },
+    "queries/source_qa.sql": {
+      "sha256": "7b635bafb3d51a06db79c98231aaaa06659e82598e6b6a8f1a171be99c7e03ec"
+    }
+  }
+}
