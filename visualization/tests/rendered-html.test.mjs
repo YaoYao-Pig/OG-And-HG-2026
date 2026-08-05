@@ -1,12 +1,51 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+const isGitHubPages = process.env.GITHUB_PAGES === "true";
+
+function resolveSiteUrl() {
+  const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+
+  try {
+    const siteUrl = new URL(
+      configuredUrl ||
+        "https://open-galaxy-collaboration-atlas.s20020515.chatgpt.site/",
+    );
+    siteUrl.pathname = `${siteUrl.pathname.replace(/\/+$/, "")}/`;
+    siteUrl.search = "";
+    siteUrl.hash = "";
+    return siteUrl;
+  } catch {
+    return new URL(
+      "https://open-galaxy-collaboration-atlas.s20020515.chatgpt.site/",
+    );
+  }
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function render() {
+  if (isGitHubPages) {
+    const html = await readFile(
+      new URL("../dist/client/index.html", import.meta.url),
+      "utf8",
+    );
+
+    return {
+      status: 200,
+      contentType: "text/html",
+      html,
+    };
+  }
+
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
-  return worker.fetch(
+  const response = await worker.fetch(
     new Request("http://localhost/", {
       headers: { accept: "text/html" },
     }),
@@ -20,22 +59,32 @@ async function render() {
       passThroughOnException() {},
     },
   );
+
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type") ?? "",
+    html: await response.text(),
+  };
 }
 
-test("server-renders the Open Galaxy collaboration atlas", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+test("server-renders the dual-source Galaxy atlas", async () => {
+  const rendered = await render();
+  assert.equal(rendered.status, 200);
+  assert.match(rendered.contentType, /^text\/html\b/i);
 
-  const html = await response.text();
+  const { html } = rendered;
   assert.match(html, /<html[^>]*\blang=["']zh-CN["']/i);
-  assert.match(html, /<title>OpenGalaxy 2025—26 · 开源协作星图<\/title>/i);
   assert.match(
     html,
-    /<meta(?=[^>]*\bname=["']description["'])(?=[^>]*\bcontent=["'][^"']*2025-08[^"']*2026-07[^"']*4,243[^"']*46,173[^"']*["'])[^>]*>/i,
+    /<title>OpenGalaxy × HubGalaxy · 开源与 AI 生态星图<\/title>/i,
+  );
+  assert.match(
+    html,
+    /<meta(?=[^>]*\bname=["']description["'])(?=[^>]*\bcontent=["'][^"']*GitHub[^"']*Hugging Face[^"']*4,243[^"']*46,173[^"']*["'])[^>]*>/i,
   );
   assert.match(html, /OPEN GALAXY/);
-  assert.match(html, /开源协作星图/);
+  assert.match(html, /开源与 AI 生态星图/);
+  assert.match(html, /02 HUGGING FACE/);
   assert.match(html, /4,243/);
   assert.match(html, /46,173/);
   assert.match(
@@ -46,9 +95,13 @@ test("server-renders the Open Galaxy collaboration atlas", async () => {
     html,
     /<meta(?=[^>]*\bname=["']theme-color["'])(?=[^>]*\bcontent=["']#05070d["'])[^>]*>/i,
   );
+  const expectedImageUrl = new URL("og.png", resolveSiteUrl()).toString();
   assert.match(
     html,
-    /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*\bcontent=["']http:\/\/localhost\/og\.png["'])[^>]*>/i,
+    new RegExp(
+      `<meta(?=[^>]*\\bproperty=["']og:image["'])(?=[^>]*\\bcontent=["']${escapeRegExp(expectedImageUrl)}["'])[^>]*>`,
+      "i",
+    ),
   );
   assert.match(
     html,
@@ -56,10 +109,27 @@ test("server-renders the Open Galaxy collaboration atlas", async () => {
   );
   assert.match(
     html,
-    /<meta(?=[^>]*\bname=["']twitter:image["'])(?=[^>]*\bcontent=["']http:\/\/localhost\/og\.png["'])[^>]*>/i,
+    new RegExp(
+      `<meta(?=[^>]*\\bname=["']twitter:image["'])(?=[^>]*\\bcontent=["']${escapeRegExp(expectedImageUrl)}["'])[^>]*>`,
+      "i",
+    ),
   );
   assert.doesNotMatch(
     html,
     /codex-preview|loading skeleton|react-loading-skeleton/i,
   );
+});
+
+test("GitHub Pages mode emits a static index", async (context) => {
+  if (!isGitHubPages) {
+    context.skip("only applies to GITHUB_PAGES=true builds");
+    return;
+  }
+
+  const html = await readFile(
+    new URL("../dist/client/index.html", import.meta.url),
+    "utf8",
+  );
+  assert.match(html, /<html[^>]*\blang=["']zh-CN["']/i);
+  assert.match(html, /OpenGalaxy × HubGalaxy/);
 });

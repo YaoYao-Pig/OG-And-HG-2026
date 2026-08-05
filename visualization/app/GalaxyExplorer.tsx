@@ -9,14 +9,17 @@ import {
   type KeyboardEvent,
 } from "react";
 import { GalaxyCanvas } from "./components/GalaxyCanvas";
-import type {
-  EdgeDensity,
-  GalaxyGraph,
-  GalaxyNode,
-  ViewCommand,
+import {
+  nodeFacetValue,
+  type EdgeDensity,
+  type GalaxyFacetItem,
+  type GalaxyGraph,
+  type GalaxyNode,
+  type ViewCommand,
 } from "./galaxy-types";
 
 type LoadState = "loading" | "ready" | "error";
+type SourceKey = "github" | "huggingface";
 
 const AREA_COLORS = [
   "#3155d6",
@@ -30,8 +33,58 @@ const AREA_COLORS = [
   "#4d9e4a",
 ];
 
+const BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+
+const SOURCE_COPY = {
+  github: {
+    title: "OpenGalaxy",
+    period: "2025—26",
+    figure: "FIG. 01 — OPEN SOURCE COLLABORATION NETWORK",
+    dataFile: "/data/graph.json",
+    defaultFacet: "language",
+    search: "Search repository / language / topic",
+    noun: "repositories",
+    relation: "relations",
+    link: "View repository on GitHub ↗",
+    footer: "OPEN GALAXY / COLLABORATION ATLAS / 2026",
+  },
+  huggingface: {
+    title: "HubGalaxy",
+    period: "DAILY",
+    figure: "FIG. 02 — HUGGING FACE MODEL LINEAGE & HUB ECOSYSTEM",
+    dataFile: "/data/huggingface.json",
+    defaultFacet: "task",
+    search: "Search model / dataset / Space / author",
+    noun: "artifacts",
+    relation: "relations",
+    link: "View artifact on Hugging Face ↗",
+    footer: "HUB GALAXY / MODEL LINEAGE ATLAS / 2026",
+  },
+} as const;
+
+const FACET_LABELS: Record<string, { short: string; full: string }> = {
+  language: { short: "LANG", full: "Language / 语言" },
+  ai: { short: "AI", full: "AI Area / AI 领域" },
+  domain: { short: "DOMAIN", full: "Domain / 总领域" },
+  type: { short: "TYPE", full: "Artifact / 载体" },
+  task: { short: "TASK", full: "AI Task / 任务" },
+  library: { short: "LIB", full: "Library / 框架" },
+  organization: { short: "ORG", full: "Organization / 组织" },
+};
+
+function assetPath(path: string) {
+  return `${BASE_PATH}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 function formatInteger(value: number) {
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatCompact(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    notation: value >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: value >= 10_000 ? 1 : 0,
+  }).format(value);
 }
 
 function formatScore(value: number) {
@@ -41,15 +94,23 @@ function formatScore(value: number) {
 }
 
 function topicList(node: GalaxyNode) {
-  if (Array.isArray(node.topics)) return node.topics.filter(Boolean).slice(0, 5);
-  return node.topics.split("|").filter(Boolean).slice(0, 5);
+  if (Array.isArray(node.topics)) return node.topics.filter(Boolean).slice(0, 6);
+  return node.topics.split("|").filter(Boolean).slice(0, 6);
+}
+
+function facetItems(graph: GalaxyGraph | null, facet: string): GalaxyFacetItem[] {
+  if (!graph) return [];
+  if (graph.meta.facets?.[facet]) return graph.meta.facets[facet];
+  if (facet === "language") return graph.meta.languages ?? [];
+  return [];
 }
 
 async function fetchGraph(
+  url: string,
   onProgress: (progress: number) => void,
   signal: AbortSignal,
 ) {
-  const response = await fetch("/data/graph.json", { signal });
+  const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`Data request failed: ${response.status}`);
   const total = Number(response.headers.get("content-length")) || 0;
   if (!response.body) {
@@ -64,7 +125,11 @@ async function fetchGraph(
     if (done) break;
     chunks.push(value);
     received += value.length;
-    onProgress(total ? Math.min(received / total, 0.99) : Math.min(received / 5_000_000, 0.96));
+    onProgress(
+      total
+        ? Math.min(received / total, 0.99)
+        : Math.min(received / 5_000_000, 0.96),
+    );
   }
   const bytes = new Uint8Array(received);
   let offset = 0;
@@ -77,34 +142,60 @@ async function fetchGraph(
 }
 
 export default function GalaxyExplorer() {
+  const [source, setSource] = useState<SourceKey>("github");
   const [graph, setGraph] = useState<GalaxyGraph | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [loadProgress, setLoadProgress] = useState(0.03);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
+  const [activeFacet, setActiveFacet] = useState("language");
+  const [selectedFacetValue, setSelectedFacetValue] = useState<string | null>(null);
   const [density, setDensity] = useState<EdgeDensity>("all");
   const [minStrength, setMinStrength] = useState(0);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [areasExpanded, setAreasExpanded] = useState(false);
   const [viewCommand, setViewCommand] = useState<ViewCommand>({ id: 0, type: "fit" });
   const searchRef = useRef<HTMLInputElement>(null);
+  const copy = SOURCE_COPY[source];
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (window.location.hash.toLowerCase() === "#huggingface") {
+        setSource("huggingface");
+        setGraph(null);
+        setLoadState("loading");
+        setLoadProgress(0.03);
+        setActiveFacet("task");
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchGraph(setLoadProgress, controller.signal)
+    let readyTimer: number | undefined;
+    fetchGraph(assetPath(copy.dataFile), setLoadProgress, controller.signal)
       .then((payload) => {
+        const order = payload.meta.facetOrder ?? Object.keys(payload.meta.facets ?? {});
+        const nextFacet = order.includes(copy.defaultFacet)
+          ? copy.defaultFacet
+          : order[0] ?? (source === "github" ? "language" : "type");
         setGraph(payload);
-        window.setTimeout(() => setLoadState("ready"), 160);
+        setActiveFacet(nextFacet);
+        readyTimer = window.setTimeout(() => setLoadState("ready"), 160);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         console.error(error);
         setLoadState("error");
       });
-    return () => controller.abort();
-  }, []);
+    return () => {
+      controller.abort();
+      if (readyTimer !== undefined) window.clearTimeout(readyTimer);
+    };
+  }, [copy.dataFile, copy.defaultFacet, source]);
 
   useEffect(() => {
     const keydown = (event: globalThis.KeyboardEvent) => {
@@ -123,6 +214,25 @@ export default function GalaxyExplorer() {
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
   }, []);
+
+  const changeSource = useCallback((next: SourceKey) => {
+    if (next === source) return;
+    setSource(next);
+    setGraph(null);
+    setLoadState("loading");
+    setLoadProgress(0.03);
+    setSelectedIndex(null);
+    setHoveredIndex(null);
+    setSelectedFacetValue(null);
+    setQuery("");
+    setSearchOpen(false);
+    setMobileOpen(false);
+    setAreasExpanded(false);
+    setDensity("all");
+    setMinStrength(0);
+    setViewCommand((current) => ({ id: current.id + 1, type: "fit" }));
+    window.history.replaceState(null, "", next === "huggingface" ? "#huggingface" : "#github");
+  }, [source]);
 
   const adjacency = useMemo(() => {
     if (!graph) return [] as number[][];
@@ -144,13 +254,31 @@ export default function GalaxyExplorer() {
     return values;
   }, [graph]);
 
+  const availableFacets = useMemo(() => {
+    if (!graph) return [];
+    const preferred = source === "github"
+      ? ["language", "ai", "domain"]
+      : ["type", "task", "library", "organization"];
+    const available = new Set([
+      ...(graph.meta.facetOrder ?? []),
+      ...Object.keys(graph.meta.facets ?? {}),
+      ...(graph.meta.languages?.length ? ["language"] : []),
+    ]);
+    return [...preferred.filter((key) => available.has(key)), ...[...available].filter((key) => !preferred.includes(key))];
+  }, [graph, source]);
+
+  const areas = useMemo(
+    () => facetItems(graph, activeFacet).filter((item) => activeFacet !== "ai" || item.name !== "Non-AI"),
+    [activeFacet, graph],
+  );
+
   const searchResults = useMemo(() => {
     if (!graph || query.trim().length < 2) return [];
     const needle = query.trim().toLocaleLowerCase();
     return graph.nodes
       .map((node, index) => ({ node, index }))
       .filter(({ node }) =>
-        `${node.name} ${node.lang} ${Array.isArray(node.topics) ? node.topics.join(" ") : node.topics}`
+        `${node.name} ${node.author ?? ""} ${node.lang} ${node.sourceType ?? ""} ${Object.values(node.areas ?? {}).map((value) => typeof value === "string" ? value : value?.primary ?? "").join(" ")} ${Array.isArray(node.topics) ? node.topics.join(" ") : node.topics}`
           .toLocaleLowerCase()
           .includes(needle),
       )
@@ -162,10 +290,8 @@ export default function GalaxyExplorer() {
       .slice(0, 7);
   }, [graph, query]);
 
-  const selectedNode =
-    graph && selectedIndex !== null ? graph.nodes[selectedIndex] : null;
-  const hoveredNode =
-    graph && hoveredIndex !== null ? graph.nodes[hoveredIndex] : null;
+  const selectedNode = graph && selectedIndex !== null ? graph.nodes[selectedIndex] : null;
+  const hoveredNode = graph && hoveredIndex !== null ? graph.nodes[hoveredIndex] : null;
 
   const selectedConnections = useMemo(() => {
     if (!graph || selectedIndex === null) return [];
@@ -179,56 +305,50 @@ export default function GalaxyExplorer() {
       .slice(0, 5);
   }, [adjacency, graph, selectedIndex]);
 
-  const languages = useMemo(() => {
-    if (!graph) return [];
-    return (graph.meta.languages ?? []).slice(0, 9).map((item) => ({
-      ...item,
-      representative:
-        graph.nodes.find((node) => node.lang === item.name)?.name ?? "—",
-    }));
-  }, [graph]);
-
-  const twinIndices = useMemo(() => {
-    if (!graph) return [];
-    if (graph.meta.twinIds?.length === 2 && graph.meta.twinIds.every((id) => typeof id === "number")) {
-      return graph.meta.twinIds as number[];
+  const strongestPair = useMemo(() => {
+    if (!graph?.edges.length) return null;
+    if (source === "github") {
+      const names = graph.meta.twinNames ?? [
+        "OneCommunityGlobal/HGNRest",
+        "OneCommunityGlobal/HighestGoodNetworkApp",
+      ];
+      const indices = names
+        .map((name) => graph.nodes.findIndex((node) => node.name === name))
+        .filter((index) => index >= 0);
+      if (indices.length === 2) {
+        const edge = graph.edges.find((item) =>
+          (item.s === indices[0] && item.t === indices[1]) ||
+          (item.t === indices[0] && item.s === indices[1]));
+        return { indices, edge: edge ?? graph.edges[0] };
+      }
     }
-    const names = graph.meta.twinNames ?? [
-      "OneCommunityGlobal/HGNRest",
-      "OneCommunityGlobal/HighestGoodNetworkApp",
-    ];
-    return names
-      .map((name) => graph.nodes.findIndex((node) => node.name === name))
-      .filter((index) => index >= 0);
-  }, [graph]);
+    const edge = graph.edges[0];
+    return { indices: [edge.s, edge.t], edge };
+  }, [graph, source]);
 
   const focusNode = useCallback((index: number) => {
     setSelectedIndex(index);
-    setSelectedLanguage(null);
+    setSelectedFacetValue(null);
     setQuery("");
     setSearchOpen(false);
     setMobileOpen(true);
-    setViewCommand((current) => ({
-      id: current.id + 1,
-      type: "focus",
-      indices: [index],
-    }));
+    setViewCommand((current) => ({ id: current.id + 1, type: "focus", indices: [index] }));
   }, []);
 
-  const focusTwins = useCallback(() => {
-    if (twinIndices.length !== 2) return;
-    setSelectedLanguage(null);
-    setSelectedIndex(twinIndices[1]);
+  const focusStrongest = useCallback(() => {
+    if (!strongestPair || strongestPair.indices.length !== 2) return;
+    setSelectedFacetValue(null);
+    setSelectedIndex(strongestPair.indices[1]);
     setViewCommand((current) => ({
       id: current.id + 1,
       type: "focus",
-      indices: twinIndices,
+      indices: strongestPair.indices,
     }));
-  }, [twinIndices]);
+  }, [strongestPair]);
 
   const overview = useCallback(() => {
     setSelectedIndex(null);
-    setSelectedLanguage(null);
+    setSelectedFacetValue(null);
     setHoveredIndex(null);
     setViewCommand((current) => ({ id: current.id + 1, type: "fit" }));
   }, []);
@@ -237,21 +357,33 @@ export default function GalaxyExplorer() {
     if (event.key === "Enter" && searchResults[0]) focusNode(searchResults[0].index);
   };
 
+  const strongestNames = strongestPair && graph
+    ? strongestPair.indices.map((index) => graph.nodes[index]?.name ?? "—")
+    : [];
+
+  const sourceTabs = (className: string) => (
+    <nav className={className} aria-label="数据源">
+      <button type="button" className={source === "github" ? "is-active" : ""} onClick={() => changeSource("github")}>01 GITHUB</button>
+      <button type="button" className={source === "huggingface" ? "is-active" : ""} onClick={() => changeSource("huggingface")}>02 HUGGING FACE</button>
+    </nav>
+  );
+
   return (
-    <main className="scientific-plate">
+    <main className={`scientific-plate source-${source}`}>
       {graph ? (
         <GalaxyCanvas
           graph={graph}
           selectedIndex={selectedIndex}
           hoveredIndex={hoveredIndex}
-          language={selectedLanguage}
+          facet={activeFacet}
+          facetValue={selectedFacetValue}
           density={density}
           minStrength={minStrength}
           viewCommand={viewCommand}
           onSelect={(index) => {
             setSelectedIndex(index);
             if (index !== null) {
-              setSelectedLanguage(null);
+              setSelectedFacetValue(null);
               setMobileOpen(true);
             }
           }}
@@ -260,8 +392,8 @@ export default function GalaxyExplorer() {
       ) : null}
 
       <header className="mobile-masthead">
-        <button type="button" onClick={overview}>OpenGalaxy</button>
-        <span>2025—26</span>
+        <button type="button" onClick={overview}>{copy.title}</button>
+        {sourceTabs("mobile-source-tabs")}
         <button
           type="button"
           aria-label="打开搜索与说明"
@@ -281,19 +413,20 @@ export default function GalaxyExplorer() {
           onClick={() => setMobileOpen((open) => !open)}
           aria-expanded={mobileOpen}
         >
-          <span>{selectedNode?.name ?? "OpenGalaxy / 4,243 repositories"}</span>
+          <span>{selectedNode?.name ?? `${copy.title} / ${formatInteger(graph?.nodes.length ?? 0)} ${copy.noun}`}</span>
           <b>{mobileOpen ? "Close" : "Info"}</b>
         </button>
 
         <div className="editorial-scroll">
-          <p className="figure-index">FIG. 01 — OPEN SOURCE COLLABORATION NETWORK</p>
+          {sourceTabs("source-tabs")}
+          <p className="figure-index">{copy.figure}</p>
           <button className="plate-title" type="button" onClick={overview}>
-            OpenGalaxy <span>2025—26</span>
+            {copy.title} <span>{copy.period}</span>
           </button>
           <div className="editorial-rule"><i /></div>
 
           <div className="plain-search">
-            <label className="sr-only" htmlFor="repository-search">搜索仓库</label>
+            <label className="sr-only" htmlFor="repository-search">搜索图谱</label>
             <input
               id="repository-search"
               ref={searchRef}
@@ -304,12 +437,12 @@ export default function GalaxyExplorer() {
               }}
               onFocus={() => setSearchOpen(true)}
               onKeyDown={searchKeyDown}
-              placeholder="Search repository / language / topic"
+              placeholder={copy.search}
               autoComplete="off"
             />
             <span>⌘K</span>
             {searchOpen && query.trim().length >= 2 ? (
-              <div className="plain-search-results" role="listbox" aria-label="仓库搜索结果">
+              <div className="plain-search-results" role="listbox" aria-label="图谱搜索结果">
                 {searchResults.length ? searchResults.map(({ node, index }) => (
                   <button
                     type="button"
@@ -319,9 +452,9 @@ export default function GalaxyExplorer() {
                     onClick={() => focusNode(index)}
                   >
                     <strong>{node.name}</strong>
-                    <small>{node.lang} / {formatScore(node.r)}</small>
+                    <small>{nodeFacetValue(node, activeFacet)} / {formatScore(node.r)}</small>
                   </button>
-                )) : <p>NO MATCHING REPOSITORY</p>}
+                )) : <p>NO MATCHING ARTIFACT</p>}
               </div>
             ) : null}
           </div>
@@ -329,15 +462,28 @@ export default function GalaxyExplorer() {
           {selectedNode ? (
             <section className="repository-sheet">
               <button className="text-back" type="button" onClick={overview}>← Return to overview</button>
-              <p className="repo-classification">{selectedNode.lang || "Unknown"} / COMMUNITY {selectedNode.c + 1}</p>
+              <p className="repo-classification">
+                {((selectedNode.sourceType ?? selectedNode.lang) || "Unknown").toUpperCase()} / {nodeFacetValue(selectedNode, activeFacet).toUpperCase()}
+              </p>
               <h1>{selectedNode.name}</h1>
-              <p className="repo-copy">{selectedNode.description || "No repository description available."}</p>
+              <p className="repo-copy">{selectedNode.description || "No public description available."}</p>
 
               <dl className="plain-metrics">
-                <div><dt>OpenRank</dt><dd>{formatScore(selectedNode.r)}</dd></div>
-                <div><dt>Contributors</dt><dd>{formatInteger(selectedNode.contributors)}</dd></div>
-                <div><dt>Direct links</dt><dd>{formatInteger(selectedNode.degree)}</dd></div>
-                <div><dt>Link strength</dt><dd>{formatScore(strengthByNode[selectedIndex ?? 0] ?? 0)}</dd></div>
+                {source === "github" ? (
+                  <>
+                    <div><dt>OpenRank</dt><dd>{formatScore(selectedNode.r)}</dd></div>
+                    <div><dt>Contributors</dt><dd>{formatInteger(selectedNode.contributors)}</dd></div>
+                    <div><dt>Direct links</dt><dd>{formatInteger(selectedNode.degree)}</dd></div>
+                    <div><dt>Link strength</dt><dd>{formatScore(strengthByNode[selectedIndex ?? 0] ?? 0)}</dd></div>
+                  </>
+                ) : (
+                  <>
+                    <div><dt>Trending</dt><dd>{formatScore(selectedNode.trending ?? selectedNode.r)}</dd></div>
+                    <div><dt>Likes</dt><dd>{formatCompact(selectedNode.likes ?? 0)}</dd></div>
+                    <div><dt>Downloads</dt><dd>{formatCompact(selectedNode.downloads ?? 0)}</dd></div>
+                    <div><dt>Direct links</dt><dd>{formatInteger(selectedNode.degree)}</dd></div>
+                  </>
+                )}
               </dl>
 
               {topicList(selectedNode).length ? (
@@ -345,65 +491,115 @@ export default function GalaxyExplorer() {
               ) : null}
 
               <div className="relation-index">
-                <div className="table-header"><span>Strongest relation</span><span>Shared</span><span>Strength</span></div>
+                <div className="table-header"><span>Strongest relation</span><span>{source === "github" ? "Shared" : "Kind"}</span><span>Strength</span></div>
                 {selectedConnections.map(({ edge, node, otherIndex }) => (
-                  <button type="button" key={`${edge.s}-${edge.t}`} onClick={() => focusNode(otherIndex)}>
+                  <button type="button" key={`${edge.s}-${edge.t}-${edge.kind ?? "relation"}`} onClick={() => focusNode(otherIndex)}>
                     <span>{node.name}</span>
-                    <span>{edge.shared}</span>
+                    <span>{source === "github" ? edge.shared : (edge.kind ?? "link").replaceAll("_", " ")}</span>
                     <span>{formatScore(edge.strength)}</span>
                   </button>
                 ))}
               </div>
 
               <a className="plain-link" href={selectedNode.url} target="_blank" rel="noreferrer">
-                View repository on GitHub ↗
+                {copy.link}
               </a>
             </section>
           ) : (
             <>
               <section className="plate-introduction">
-                <p>
-                  OpenGalaxy is generated from the contributor collaboration network of active GitHub repositories observed across twelve complete months. The graph contains <b>4,243 repositories</b> and <b>46,173 relations</b>.
-                </p>
-                <p>
-                  OpenGalaxy 由 2025 年 8 月至 2026 年 7 月间的 GitHub 开源协作网络生成。节点代表仓库；连接表示至少两位已知非 Bot 贡献者同时参与过两个仓库。
-                </p>
+                {source === "github" ? (
+                  <>
+                    <p>
+                      OpenGalaxy is generated from the contributor collaboration network of active GitHub repositories observed across twelve complete months. The graph contains <b>{formatInteger(graph?.nodes.length ?? 4_243)} repositories</b> and <b>{formatInteger(graph?.edges.length ?? 46_173)} relations</b>.
+                    </p>
+                    <p>
+                      OpenGalaxy 由 2025 年 8 月至 2026 年 7 月间的 GitHub 开源协作网络生成。现在可按编程语言、AI 子领域与总技术领域切换观察。
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      HubGalaxy distills the daily <b>Hugging Face Hub</b> snapshot into a high-signal model lineage and artifact ecosystem. This plate contains <b>{formatInteger(graph?.nodes.length ?? 0)} artifacts</b> and <b>{formatInteger(graph?.edges.length ?? 0)} declared or inferred relations</b>.
+                    </p>
+                    <p>
+                      数据来自 cfahlgren1/hub-stats 的每日快照。模型、数据集与 Space 通过谱系、发布者和受控语义亲和形成可浏览星图；全量五百余万条记录不会直接下发浏览器。
+                    </p>
+                  </>
+                )}
               </section>
 
               <section className="area-index">
+                <nav className="facet-switch" aria-label="Area 分类维度">
+                  {availableFacets.map((key) => (
+                    <button
+                      type="button"
+                      key={key}
+                      className={activeFacet === key ? "is-active" : ""}
+                      onClick={() => {
+                        setActiveFacet(key);
+                        setSelectedFacetValue(null);
+                        setSelectedIndex(null);
+                        setAreasExpanded(false);
+                      }}
+                    >
+                      {FACET_LABELS[key]?.short ?? key.toUpperCase()}
+                    </button>
+                  ))}
+                </nav>
                 <div className="area-header">
-                  <span>Area / 领域</span>
-                  <span>Representative repo / 代表项目</span>
+                  <span>{FACET_LABELS[activeFacet]?.full ?? "Area / 领域"}</span>
+                  <span>Representative / 代表项目</span>
                   <span>Count</span>
                 </div>
                 <button
                   type="button"
-                  className={selectedLanguage === null ? "is-active" : ""}
-                  onClick={() => setSelectedLanguage(null)}
+                  className={selectedFacetValue === null ? "is-active" : ""}
+                  onClick={() => setSelectedFacetValue(null)}
                 >
                   <i className="all-areas" />
                   <span><b>ALL</b><small>Complete network</small></span>
                   <span>{graph ? formatInteger(graph.nodes.length) : "—"}</span>
                 </button>
-                {languages.slice(0, 8).map((item, index) => (
+                {(areasExpanded ? areas : areas.slice(0, 9)).map((item, index) => {
+                  const representative = item.representative ?? graph?.nodes.find((node) => nodeFacetValue(node, activeFacet) === item.name)?.name ?? "—";
+                  return (
+                    <button
+                      type="button"
+                      key={item.name}
+                      className={selectedFacetValue === item.name ? "is-active" : ""}
+                      onClick={() => setSelectedFacetValue((current) => current === item.name ? null : item.name)}
+                    >
+                      <i style={{ background: item.color ?? AREA_COLORS[index % AREA_COLORS.length] }} />
+                      <span><b>{item.name || "Unknown"}</b><small>{representative}</small></span>
+                      <span>{formatInteger(item.count)}</span>
+                    </button>
+                  );
+                })}
+                {areas.length > 9 ? (
                   <button
                     type="button"
-                    key={item.name}
-                    className={selectedLanguage === item.name ? "is-active" : ""}
-                    onClick={() => setSelectedLanguage((current) => current === item.name ? null : item.name)}
+                    className="area-expand"
+                    aria-expanded={areasExpanded}
+                    onClick={() => setAreasExpanded((expanded) => !expanded)}
                   >
-                    <i style={{ background: AREA_COLORS[index] }} />
-                    <span><b>{item.name || "Unknown"}</b><small>{item.representative}</small></span>
-                    <span>{formatInteger(item.count)}</span>
+                    <span>{areasExpanded ? "SHOW TOP AREAS" : `VIEW ALL ${areas.length} AREAS`}</span>
+                    <span>{areasExpanded ? "−" : `+${areas.length - 9}`}</span>
                   </button>
-                ))}
+                ) : null}
               </section>
 
-              <button className="strongest-relation" type="button" onClick={focusTwins}>
-                <span>Strongest recorded relation</span>
-                <b>HGNRest ↔ HighestGoodNetworkApp</b>
-                <small>{graph?.meta.twinEdge?.shared ?? 102} shared contributors / strength {formatScore(graph?.meta.twinEdge?.strength ?? 371.8995)}</small>
-              </button>
+              {strongestPair && strongestNames.length === 2 ? (
+                <button className="strongest-relation" type="button" onClick={focusStrongest}>
+                  <span>{source === "github" ? "Strongest recorded relation" : "Strongest visible lineage"}</span>
+                  <b>{strongestNames[0]} ↔ {strongestNames[1]}</b>
+                  <small>
+                    {source === "github"
+                      ? `${strongestPair.edge.shared} shared contributors / strength ${formatScore(strongestPair.edge.strength)}`
+                      : `${(strongestPair.edge.kind ?? "relation").replaceAll("_", " ")} / strength ${formatScore(strongestPair.edge.strength)}`}
+                  </small>
+                </button>
+              ) : null}
             </>
           )}
 
@@ -418,22 +614,31 @@ export default function GalaxyExplorer() {
           </section>
 
           <div className="method-notes">
-            <p>[1] 数据周期：2025.08—2026.07；来源完整性检查：PASS。</p>
-            <p>[2] 关系表示共享已知非 Bot 贡献者形成的协作亲和，不代表代码依赖或组织归属。</p>
+            {source === "github" ? (
+              <>
+                <p>[1] 数据周期：2025.08—2026.07；元数据分类按 curated label → topic → description 逐级回填。</p>
+                <p>[2] 关系表示共享已知非 Bot 贡献者形成的协作亲和，不代表代码依赖或组织归属。</p>
+              </>
+            ) : (
+              <>
+                <p>[1] 来源：cfahlgren1/hub-stats / revision {graph?.meta.sourceRevision?.slice(0, 8) ?? "current"} / daily snapshot.</p>
+                <p>[2] 谱系与同发布者关系为直接信号；语义亲和边标记为 inferred，不等同于依赖关系。</p>
+              </>
+            )}
           </div>
         </div>
       </aside>
 
       <div className="plate-meta" aria-label="图谱统计">
-        <span>2025.08 — 2026.07</span>
-        <span>NODES <b>4,243</b></span>
-        <span>EDGES <b>46,173</b></span>
+        <span>{source === "github" ? "2025.08 — 2026.07" : (graph?.meta.snapshotAt ?? graph?.meta.generatedAt ?? "DAILY SNAPSHOT").slice(0, 10)}</span>
+        <span>NODES <b>{formatInteger(graph?.nodes.length ?? 0)}</b></span>
+        <span>EDGES <b>{formatInteger(graph?.edges.length ?? 0)}</b></span>
       </div>
 
       {hoveredNode && selectedIndex === null ? (
         <div className="hover-readout">
           <strong>{hoveredNode.name}</strong>
-          <span>{hoveredNode.lang} / OpenRank {formatScore(hoveredNode.r)} / {formatInteger(hoveredNode.degree)} links</span>
+          <span>{nodeFacetValue(hoveredNode, activeFacet)} / {source === "github" ? `OpenRank ${formatScore(hoveredNode.r)}` : `Trend ${formatScore(hoveredNode.trending ?? hoveredNode.r)}`} / {formatInteger(hoveredNode.degree)} links</span>
         </div>
       ) : null}
 
@@ -444,7 +649,7 @@ export default function GalaxyExplorer() {
       </nav>
 
       <footer className="plate-footer">
-        <span>OPEN GALAXY / COLLABORATION ATLAS / 2026</span>
+        <span>{copy.footer}</span>
         <span>DRAG TO EXPLORE · SCROLL TO SCALE · CLICK TO INSPECT</span>
       </footer>
 
@@ -452,12 +657,12 @@ export default function GalaxyExplorer() {
         <div className={`minimal-loader state-${loadState}`} role="status" aria-live="polite">
           {loadState === "error" ? (
             <>
-              <p>Unable to load graph data.</p>
+              <p>Unable to load {copy.title} field data.</p>
               <button type="button" onClick={() => window.location.reload()}>Retry</button>
             </>
           ) : (
             <>
-              <p>OpenGalaxy / loading field data</p>
+              <p>{copy.title} / loading field data</p>
               <div><i style={{ width: `${Math.max(3, loadProgress * 100)}%` }} /></div>
               <span>{Math.round(loadProgress * 100).toString().padStart(2, "0")}%</span>
             </>

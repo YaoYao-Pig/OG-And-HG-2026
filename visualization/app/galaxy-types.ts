@@ -6,6 +6,26 @@ export type GalaxyLanguage = {
   color?: string;
 };
 
+export type GalaxyFacetItem = {
+  name: string;
+  count: number;
+  representative?: string;
+  color?: string;
+};
+
+export type GalaxyAreaValue = {
+  primary: string;
+  tags?: string[];
+  source?: string;
+  confidence?: number;
+  isAi?: boolean;
+};
+
+export type GalaxyAreas = Record<
+  string,
+  GalaxyAreaValue | string | undefined
+>;
+
 export type GalaxyCommunity = {
   id: number;
   count: number;
@@ -41,6 +61,15 @@ export type GalaxyMeta = {
     strength: number;
   };
   languages?: GalaxyLanguage[];
+  facets?: Record<string, GalaxyFacetItem[]>;
+  facetOrder?: string[];
+  source?: "github" | "huggingface";
+  sourceRevision?: string;
+  sourceUrl?: string;
+  generatedAt?: string;
+  snapshotAt?: string;
+  entityCounts?: Record<string, number>;
+  relationKinds?: Record<string, number>;
   communities?: GalaxyCommunity[];
   bounds?: {
     minX: number;
@@ -59,6 +88,13 @@ export type GalaxyNode = {
   r: number;
   c: number;
   lang: string;
+  areas?: GalaxyAreas;
+  sourceType?: string;
+  author?: string;
+  likes?: number;
+  downloads?: number;
+  trending?: number;
+  updatedAt?: string;
   contributors: number;
   degree: number;
   topics: string[] | string;
@@ -73,6 +109,8 @@ export type GalaxyEdge = {
   shared: number;
   strength: number;
   b?: 0 | 1;
+  kind?: string;
+  inferred?: 0 | 1;
 };
 
 export type GalaxyGraph = {
@@ -87,3 +125,12 @@ export type ViewCommand = {
   indices?: number[];
   factor?: number;
 };
+
+export function nodeFacetValue(node: GalaxyNode, facet: string): string {
+  const area = node.areas?.[facet];
+  if (typeof area === "string") return area;
+  if (area?.primary) return area.primary;
+  if (facet === "language") return node.lang || "Unknown";
+  if (facet === "type") return node.sourceType || "Unknown";
+  return "Unclassified";
+}

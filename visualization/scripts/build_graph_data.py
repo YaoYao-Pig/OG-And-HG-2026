@@ -20,6 +20,7 @@ import heapq
 import json
 import math
 import os
+import re
 import statistics
 import tempfile
 from collections import Counter, defaultdict
@@ -53,6 +54,443 @@ COMMON_LANGUAGE_COLORS = {
 }
 
 
+# Tech-0's broad software taxonomy, expanded with common GitHub topic and
+# description vocabulary.  Ordering is meaningful: it is the deterministic
+# tie-breaker used when two domains receive the same score.
+DOMAIN_ORDER = (
+    "AI",
+    "Agentic AI",
+    "Application Software",
+    "Big Data",
+    "Blockchain",
+    "Cloud Native",
+    "Database",
+    "Development Tools",
+    "IoT",
+    "Operating System",
+    "Programming Language",
+    "Web Frameworks",
+)
+
+DOMAIN_KEYWORDS = {
+    "Application Software": (
+        "application",
+        "app",
+        "desktop",
+        "mobile",
+        "android",
+        "ios",
+        "productivity",
+        "collaboration",
+        "ecommerce",
+        "e-commerce",
+        "cms",
+        "content management",
+        "erp",
+        "crm",
+        "chat",
+        "browser",
+        "media player",
+        "video",
+        "music",
+        "game",
+        "gaming",
+        "home assistant",
+        "self hosted",
+        "dashboard",
+        "email client",
+        "note taking",
+    ),
+    "Big Data": (
+        "big data",
+        "analytics",
+        "data analytics",
+        "data engineering",
+        "data pipeline",
+        "data processing",
+        "data visualization",
+        "business intelligence",
+        "olap",
+        "etl",
+        "elt",
+        "streaming",
+        "stream processing",
+        "apache spark",
+        "spark",
+        "hadoop",
+        "flink",
+        "kafka",
+        "airflow",
+        "dbt",
+        "data lake",
+        "data warehouse",
+        "lakehouse",
+        "arrow",
+        "parquet",
+        "scientific computing",
+        "data science",
+    ),
+    "Blockchain": (
+        "blockchain",
+        "web3",
+        "ethereum",
+        "bitcoin",
+        "cryptocurrency",
+        "crypto currency",
+        "smart contract",
+        "solidity",
+        "defi",
+        "decentralized",
+        "distributed ledger",
+        "wallet",
+        "nft",
+    ),
+    "Cloud Native": (
+        "cloud native",
+        "kubernetes",
+        "k8s",
+        "docker",
+        "container",
+        "containers",
+        "containerd",
+        "cncf",
+        "devops",
+        "sre",
+        "observability",
+        "opentelemetry",
+        "prometheus",
+        "service mesh",
+        "microservices",
+        "serverless",
+        "terraform",
+        "helm",
+        "orchestration",
+        "cloud computing",
+        "aws",
+        "azure",
+        "openstack",
+        "infrastructure as code",
+        "iac",
+        "ci cd",
+        "continuous delivery",
+        "distributed tracing",
+        "monitoring",
+    ),
+    "Database": (
+        "database",
+        "dbms",
+        "sql",
+        "nosql",
+        "postgresql",
+        "postgres",
+        "mysql",
+        "sqlite",
+        "mongodb",
+        "redis",
+        "elasticsearch",
+        "search engine",
+        "vector database",
+        "time series database",
+        "distributed database",
+        "query engine",
+        "storage engine",
+        "orm",
+        "cache",
+    ),
+    "Development Tools": (
+        "developer tools",
+        "development tools",
+        "devtool",
+        "ide",
+        "editor",
+        "code editor",
+        "vscode",
+        "neovim",
+        "cli",
+        "command line",
+        "terminal",
+        "sdk",
+        "api",
+        "library",
+        "build tool",
+        "package manager",
+        "testing",
+        "test framework",
+        "linter",
+        "formatter",
+        "static analysis",
+        "debugger",
+        "profiling",
+        "compiler toolchain",
+        "git",
+        "github",
+        "workflow",
+        "automation",
+        "documentation",
+        "reverse engineering",
+        "security tools",
+        "code quality",
+        "monorepo",
+    ),
+    "IoT": (
+        "iot",
+        "internet of things",
+        "embedded",
+        "embedded systems",
+        "firmware",
+        "microcontroller",
+        "arduino",
+        "esp32",
+        "raspberry pi",
+        "mqtt",
+        "home automation",
+        "sensor",
+        "edge computing",
+    ),
+    "Operating System": (
+        "operating system",
+        "os kernel",
+        "kernel",
+        "linux",
+        "nixos",
+        "unix",
+        "bsd",
+        "windows",
+        "macos",
+        "android os",
+        "filesystem",
+        "file system",
+        "bootloader",
+        "systemd",
+        "virtualization",
+        "hypervisor",
+        "emulator",
+    ),
+    "Programming Language": (
+        "programming language",
+        "compiler",
+        "interpreter",
+        "language runtime",
+        "runtime system",
+        "virtual machine",
+        "bytecode",
+        "parser",
+        "lexer",
+        "llvm",
+        "webassembly",
+        "wasm",
+        "language server",
+        "type system",
+    ),
+    "Web Frameworks": (
+        "web framework",
+        "frontend framework",
+        "frontend",
+        "backend framework",
+        "full stack",
+        "react",
+        "reactjs",
+        "vue",
+        "vuejs",
+        "angular",
+        "nextjs",
+        "next.js",
+        "nuxt",
+        "svelte",
+        "django",
+        "flask",
+        "fastapi",
+        "laravel",
+        "rails",
+        "spring boot",
+        "nodejs",
+        "express",
+        "tailwindcss",
+        "web components",
+        "ui components",
+        "component library",
+        "design system",
+        "wordpress",
+    ),
+}
+
+AI_SUBCATEGORY_ORDER = (
+    "LLM & Generative AI",
+    "Agents & RAG",
+    "ML Frameworks",
+    "Computer Vision",
+    "NLP & Speech",
+    "Data / Evaluation / MLOps",
+    "Robotics",
+    "AI Applications",
+)
+
+AI_SUBCATEGORY_KEYWORDS = {
+    "LLM & Generative AI": (
+        "llm",
+        "llms",
+        "large language model",
+        "large language models",
+        "generative ai",
+        "genai",
+        "gpt",
+        "chatgpt",
+        "claude",
+        "gemini",
+        "deepseek",
+        "qwen",
+        "llama",
+        "transformer",
+        "diffusion",
+        "stable diffusion",
+        "text generation",
+        "image generation",
+        "multimodal",
+        "foundation model",
+        "fine tuning",
+        "prompt engineering",
+    ),
+    "Agents & RAG": (
+        "ai agent",
+        "ai agents",
+        "agentic ai",
+        "agentic",
+        "agents",
+        "rag",
+        "retrieval augmented generation",
+        "mcp",
+        "mcp server",
+        "model context protocol",
+        "langchain",
+        "llamaindex",
+        "autogen",
+        "crew ai",
+        "tool calling",
+        "function calling",
+        "multi agent",
+    ),
+    "ML Frameworks": (
+        "machine learning",
+        "deep learning",
+        "ml framework",
+        "neural network",
+        "pytorch",
+        "tensorflow",
+        "keras",
+        "jax",
+        "scikit learn",
+        "sklearn",
+        "xgboost",
+        "lightgbm",
+        "onnx",
+        "cuda",
+        "tensor",
+        "autograd",
+    ),
+    "Computer Vision": (
+        "computer vision",
+        "image recognition",
+        "image classification",
+        "object detection",
+        "image segmentation",
+        "vision transformer",
+        "opencv",
+        "yolo",
+        "ocr",
+        "visual recognition",
+        "3d vision",
+    ),
+    "NLP & Speech": (
+        "natural language processing",
+        "nlp",
+        "speech recognition",
+        "speech synthesis",
+        "text to speech",
+        "tts",
+        "speech to text",
+        "stt",
+        "automatic speech recognition",
+        "asr",
+        "whisper",
+        "voice assistant",
+        "audio generation",
+        "translation model",
+    ),
+    "Data / Evaluation / MLOps": (
+        "mlops",
+        "llmops",
+        "model evaluation",
+        "llm evaluation",
+        "evaluation",
+        "benchmark",
+        "ai benchmark",
+        "dataset",
+        "data labeling",
+        "feature store",
+        "model monitoring",
+        "experiment tracking",
+        "model serving",
+        "inference server",
+        "inference engine",
+        "vector search",
+        "embedding",
+        "embeddings",
+    ),
+    "Robotics": (
+        "robotics",
+        "robot",
+        "ros",
+        "robot operating system",
+        "autonomous driving",
+        "self driving",
+        "slam",
+        "motion planning",
+        "reinforcement learning",
+    ),
+    "AI Applications": (
+        "artificial intelligence",
+        "ai",
+        "ai application",
+        "ai assistant",
+        "personal assistant",
+        "chatbot",
+        "copilot",
+        "code assistant",
+        "ai coding",
+        "recommendation system",
+        "recommender system",
+        "intelligent assistant",
+    ),
+}
+
+DOMAIN_COLORS = {
+    "AI": "#6f78ff",
+    "Agentic AI": "#23c5c9",
+    "Application Software": "#d77ad8",
+    "Big Data": "#65b9ab",
+    "Blockchain": "#e0ad55",
+    "Cloud Native": "#5ca9da",
+    "Database": "#78b86d",
+    "Development Tools": "#a4a9b5",
+    "IoT": "#dd8756",
+    "Operating System": "#cf6c78",
+    "Programming Language": "#9a7bd5",
+    "Web Frameworks": "#cb7895",
+}
+
+AI_COLORS = {
+    "LLM & Generative AI": "#777cff",
+    "Agents & RAG": "#2fc3c7",
+    "ML Frameworks": "#a184d8",
+    "Computer Vision": "#d9769a",
+    "NLP & Speech": "#739cd7",
+    "Data / Evaluation / MLOps": "#6caf9c",
+    "Robotics": "#d58d5e",
+    "AI Applications": "#c9a15a",
+    "Non-AI": "#92979e",
+}
+
+
 def stable_unit(value: str) -> float:
     """Return a stable number in [0, 1) without Python's randomized hash()."""
 
@@ -77,6 +515,416 @@ def community_color(community_id: int) -> str:
     return f"#{round(red * 255):02x}{round(green * 255):02x}{round(blue * 255):02x}"
 
 
+def normalize_taxonomy_text(value: str) -> str:
+    """Normalize prose and GitHub topics for phrase-safe lexical matching."""
+
+    return " ".join(re.sub(r"[^a-z0-9+#.]+", " ", value.casefold()).split())
+
+
+def contains_taxonomy_phrase(normalized_text: str, normalized_phrase: str) -> bool:
+    if not normalized_text or not normalized_phrase:
+        return False
+    return f" {normalized_phrase} " in f" {normalized_text} "
+
+
+def keyword_evidence(
+    keywords: tuple[str, ...],
+    topic_values: tuple[str, ...],
+    description: str,
+) -> tuple[float, list[tuple[str, float]], set[str]]:
+    """Score a keyword list, weighting curated topics above prose mentions."""
+
+    matches: list[tuple[str, float]] = []
+    sources: set[str] = set()
+    for keyword in keywords:
+        normalized_keyword = normalize_taxonomy_text(keyword)
+        contribution = 0.0
+        topic_hit = False
+        for topic in topic_values:
+            if topic == normalized_keyword:
+                contribution = max(contribution, 4.6)
+                topic_hit = True
+            elif contains_taxonomy_phrase(topic, normalized_keyword):
+                contribution = max(contribution, 3.1)
+                topic_hit = True
+        if topic_hit:
+            sources.add("topics")
+        if contains_taxonomy_phrase(description, normalized_keyword):
+            contribution += 1.15 if len(normalized_keyword) > 2 else 0.9
+            sources.add("description")
+        if contribution:
+            matches.append((keyword, contribution))
+    matches.sort(key=lambda item: (-item[1], item[0]))
+    return sum(contribution for _, contribution in matches), matches, sources
+
+
+def taxonomy_inputs(node: dict[str, Any]) -> tuple[tuple[str, ...], str]:
+    topics = tuple(
+        normalized
+        for topic in node["topics"].split("|")
+        if (normalized := normalize_taxonomy_text(topic))
+    )
+    return topics, normalize_taxonomy_text(node["description"])
+
+
+def confidence_from_score(score: float, *, floor: float = 0.52) -> float:
+    return round(min(0.99, floor + 0.45 * score / (score + 7.0)), 2)
+
+
+def classify_ai(node: dict[str, Any]) -> dict[str, Any]:
+    topics, description = taxonomy_inputs(node)
+    scores: dict[str, float] = {}
+    evidence_by_category: dict[str, list[tuple[str, float]]] = {}
+    sources: set[str] = set()
+    for category in AI_SUBCATEGORY_ORDER:
+        score, evidence, category_sources = keyword_evidence(
+            AI_SUBCATEGORY_KEYWORDS[category],
+            topics,
+            description,
+        )
+        scores[category] = score
+        evidence_by_category[category] = evidence
+        sources.update(category_sources)
+
+    primary = min(
+        AI_SUBCATEGORY_ORDER,
+        key=lambda category: (-scores[category], AI_SUBCATEGORY_ORDER.index(category)),
+    )
+    best_score = scores[primary]
+    is_ai = best_score >= 0.9
+    if not is_ai:
+        return {
+            "isAi": False,
+            "primary": "Non-AI",
+            "tags": [],
+            "source": "tech0-ai-lexicon-v1:no-signal",
+            "confidence": 0.58,
+        }
+
+    all_evidence = [
+        (keyword, contribution)
+        for evidence in evidence_by_category.values()
+        for keyword, contribution in evidence
+    ]
+    all_evidence.sort(key=lambda item: (-item[1], item[0]))
+    tags: list[str] = []
+    for keyword, _ in all_evidence:
+        if keyword not in tags:
+            tags.append(keyword)
+        if len(tags) == 6:
+            break
+    source_suffix = "+".join(sorted(sources)) or "no-signal"
+    return {
+        "isAi": True,
+        "primary": primary,
+        "tags": tags,
+        "source": f"tech0-ai-lexicon-v1:{source_suffix}",
+        "confidence": confidence_from_score(best_score, floor=0.57),
+    }
+
+
+DOMAIN_TIE_ORDER = (
+    "Blockchain",
+    "Database",
+    "IoT",
+    "Operating System",
+    "Programming Language",
+    "Web Frameworks",
+    "Big Data",
+    "Cloud Native",
+    "Application Software",
+    "Development Tools",
+)
+
+
+def domain_fallback(language: str) -> str:
+    if language in {"Shell", "Nix", "HCL", "Dockerfile", "Makefile"}:
+        return "Cloud Native"
+    if language in {
+        "JavaScript",
+        "TypeScript",
+        "HTML",
+        "CSS",
+        "Dart",
+        "Kotlin",
+        "Swift",
+        "C#",
+        "Java",
+        "PHP",
+        "Ruby",
+    }:
+        return "Application Software"
+    if language in {"PLpgSQL", "SQLPL"}:
+        return "Database"
+    return "Development Tools"
+
+
+def classify_domain(node: dict[str, Any], ai_area: dict[str, Any]) -> dict[str, Any]:
+    # AI is first-class in Tech-0.  Preserve the more specific Agentic AI split
+    # instead of allowing generic words such as "framework" to override it.
+    if ai_area["isAi"]:
+        primary = "Agentic AI" if ai_area["primary"] == "Agents & RAG" else "AI"
+        return {
+            "primary": primary,
+            "tags": list(ai_area["tags"]),
+            "source": ai_area["source"].replace("tech0-ai", "tech0-domain"),
+            "confidence": ai_area["confidence"],
+        }
+
+    topics, description = taxonomy_inputs(node)
+    scores: dict[str, float] = {}
+    evidence_by_category: dict[str, list[tuple[str, float]]] = {}
+    sources_by_category: dict[str, set[str]] = {}
+    for category in DOMAIN_TIE_ORDER:
+        score, evidence, sources = keyword_evidence(
+            DOMAIN_KEYWORDS[category],
+            topics,
+            description,
+        )
+        scores[category] = score
+        evidence_by_category[category] = evidence
+        sources_by_category[category] = sources
+
+    primary = min(
+        DOMAIN_TIE_ORDER,
+        key=lambda category: (-scores[category], DOMAIN_TIE_ORDER.index(category)),
+    )
+    best_score = scores[primary]
+    if best_score == 0:
+        primary = domain_fallback(node["lang"])
+        return {
+            "primary": primary,
+            "tags": [node["lang"]],
+            "source": "tech0-domain-lexicon-v1:primary_language-fallback",
+            "confidence": 0.24,
+        }
+
+    tags = [keyword for keyword, _ in evidence_by_category[primary][:6]]
+    source_suffix = "+".join(sorted(sources_by_category[primary]))
+    return {
+        "primary": primary,
+        "tags": tags,
+        "source": f"tech0-domain-lexicon-v1:{source_suffix}",
+        "confidence": confidence_from_score(best_score),
+    }
+
+
+def curated_label_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        if stripped.startswith("["):
+            try:
+                decoded = json.loads(stripped)
+            except json.JSONDecodeError:
+                decoded = None
+            if isinstance(decoded, list):
+                return curated_label_values(decoded)
+        return [part.strip() for part in re.split(r"[|;,]", stripped) if part.strip()]
+    if isinstance(value, (list, tuple)):
+        values: list[str] = []
+        for item in value:
+            values.extend(curated_label_values(item))
+        return values
+    return [str(value)]
+
+
+def curated_boolean(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().casefold() in {"1", "true", "yes", "y"}
+
+
+def normalize_repo_id(value: Any) -> str:
+    normalized = str(value).strip()
+    if normalized.casefold().startswith("github:"):
+        normalized = normalized.split(":", 1)[1]
+    return normalized
+
+
+def load_area_enrichment(path: Path | None) -> dict[str, dict[str, Any]]:
+    """Load optional curated labels without coupling generation to ClickHouse."""
+
+    if path is None:
+        return {}
+    with path.open("r", encoding="utf-8-sig") as handle:
+        payload = json.load(handle)
+
+    keyed_records: list[tuple[str | None, dict[str, Any]]] = []
+    if isinstance(payload, list):
+        keyed_records = [(None, record) for record in payload if isinstance(record, dict)]
+    elif isinstance(payload, dict):
+        container = next(
+            (payload[key] for key in ("repositories", "items", "rows", "data") if key in payload),
+            None,
+        )
+        if isinstance(container, list):
+            keyed_records = [(None, record) for record in container if isinstance(record, dict)]
+        elif isinstance(container, dict) and all(
+            isinstance(record, dict) for record in container.values()
+        ):
+            keyed_records = [(str(key), record) for key, record in container.items()]
+        elif all(isinstance(record, dict) for record in payload.values()):
+            keyed_records = [(str(key), record) for key, record in payload.items()]
+        else:
+            raise ValueError(
+                f"{path} must be a record list, keyed record object, or contain rows/items/data"
+            )
+    else:
+        raise ValueError(f"{path} must contain a JSON array or object")
+
+    enrichment: dict[str, dict[str, Any]] = {}
+    for lookup_key, record in keyed_records:
+        repo_id = record.get("repo_id", record.get("repoId"))
+        name = record.get("name", record.get("repo_name", record.get("repository")))
+        if repo_id is None and name is None and lookup_key is not None:
+            if normalize_repo_id(lookup_key).isdigit():
+                repo_id = lookup_key
+            else:
+                name = lookup_key
+        keys: list[str] = []
+        if repo_id is not None and normalize_repo_id(repo_id):
+            keys.append(f"repo:{normalize_repo_id(repo_id)}")
+        if name is not None and str(name).strip():
+            keys.append(f"name:{str(name).strip().casefold()}")
+        if not keys:
+            continue
+        for key in keys:
+            existing = enrichment.get(key)
+            if existing is not None and existing != record:
+                raise ValueError(f"Duplicate area enrichment key: {key}")
+            enrichment[key] = record
+    return enrichment
+
+
+def canonical_domain_label(labels: list[str]) -> str | None:
+    exact = {normalize_taxonomy_text(category): category for category in DOMAIN_ORDER}
+    aliases = {
+        "artificial intelligence": "AI",
+        "agentic": "Agentic AI",
+        "applications": "Application Software",
+        "application": "Application Software",
+        "data": "Big Data",
+        "bigdata": "Big Data",
+        "block chain": "Blockchain",
+        "crypto": "Blockchain",
+        "cloud": "Cloud Native",
+        "cloud infrastructure": "Cloud Native",
+        "databases": "Database",
+        "libraries and frameworks": "Development Tools",
+        "software tools": "Development Tools",
+        "developer tooling": "Development Tools",
+        "devtools": "Development Tools",
+        "internet of things": "IoT",
+        "os": "Operating System",
+        "system software": "Operating System",
+        "non software": "Development Tools",
+        "languages": "Programming Language",
+        "programming languages": "Programming Language",
+        "web": "Web Frameworks",
+        "web frameworks": "Web Frameworks",
+    }
+    for label in labels:
+        normalized = normalize_taxonomy_text(label)
+        if normalized in exact:
+            return exact[normalized]
+        if normalized in aliases:
+            return aliases[normalized]
+    return None
+
+
+def canonical_ai_label(labels: list[str]) -> str | None:
+    exact = {normalize_taxonomy_text(category): category for category in AI_SUBCATEGORY_ORDER}
+    aliases = {
+        "llm": "LLM & Generative AI",
+        "large language models": "LLM & Generative AI",
+        "generative ai": "LLM & Generative AI",
+        "genai": "LLM & Generative AI",
+        "agent": "Agents & RAG",
+        "agents": "Agents & RAG",
+        "agentic ai": "Agents & RAG",
+        "rag": "Agents & RAG",
+        "machine learning": "ML Frameworks",
+        "deep learning": "ML Frameworks",
+        "computer vision": "Computer Vision",
+        "nlp": "NLP & Speech",
+        "speech": "NLP & Speech",
+        "mlops": "Data / Evaluation / MLOps",
+        "evaluation": "Data / Evaluation / MLOps",
+        "data": "Data / Evaluation / MLOps",
+        "robotics": "Robotics",
+        "ai application": "AI Applications",
+        "ai applications": "AI Applications",
+    }
+    for label in labels:
+        normalized = normalize_taxonomy_text(label)
+        if normalized in exact:
+            return exact[normalized]
+        if normalized in aliases:
+            return aliases[normalized]
+        if "vector database" in normalized or "infrastructure data" in normalized:
+            return "Data / Evaluation / MLOps"
+        if "platform environment" in normalized or "develop tool" in normalized:
+            return "Data / Evaluation / MLOps"
+        if "framework architecture" in normalized:
+            return "ML Frameworks"
+        if "large language model" in normalized or "generative artificial intelligence" in normalized:
+            return "LLM & Generative AI"
+        if normalized.endswith(" application"):
+            return "AI Applications"
+    return None
+
+
+def apply_curated_areas(
+    ai_area: dict[str, Any],
+    domain_area: dict[str, Any],
+    curated: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if curated is None:
+        return ai_area, domain_area
+
+    tech0_labels = curated_label_values(curated.get("tech0_labels"))
+    domain0_labels = curated_label_values(curated.get("domain0_labels"))
+    ai_labels = curated_label_values(curated.get("ai_labels"))
+    has_agentic_flag = "is_agentic_ai" in curated
+    is_agentic = curated_boolean(curated.get("is_agentic_ai")) if has_agentic_flag else False
+    has_ai_data = "ai_labels" in curated or has_agentic_flag
+
+    curated_ai_primary = canonical_ai_label(ai_labels)
+    if is_agentic:
+        curated_ai_primary = "Agents & RAG"
+    if has_ai_data:
+        is_ai = is_agentic or bool(ai_labels)
+        if is_ai and curated_ai_primary is None and ai_area["isAi"]:
+            curated_ai_primary = ai_area["primary"]
+        ai_area = {
+            "isAi": is_ai,
+            "primary": curated_ai_primary or ("AI Applications" if is_ai else "Non-AI"),
+            "tags": ai_labels[:6],
+            "source": "curated",
+            "confidence": 1.0,
+        }
+
+    curated_domain = canonical_domain_label(tech0_labels + domain0_labels)
+    if is_agentic:
+        curated_domain = "Agentic AI"
+    elif ai_area["isAi"] and (has_ai_data or curated_domain == "AI"):
+        curated_domain = "AI"
+    if curated_domain is not None:
+        domain_area = {
+            "primary": curated_domain,
+            "tags": (tech0_labels + domain0_labels + ai_labels)[:6],
+            "source": "curated",
+            "confidence": 1.0,
+        }
+    return ai_area, domain_area
+
+
 def parse_float(value: str, field: str) -> float:
     try:
         number = float(value)
@@ -97,6 +945,7 @@ def parse_int(value: str, field: str) -> int:
 def read_nodes(path: Path) -> tuple[list[dict[str, Any]], dict[str, int]]:
     required = {
         "id",
+        "repo_id",
         "name",
         "display_label",
         "openrank_sum",
@@ -126,6 +975,7 @@ def read_nodes(path: Path) -> tuple[list[dict[str, Any]], dict[str, int]]:
             nodes.append(
                 {
                     "id": node_id,
+                    "repoId": row["repo_id"].strip(),
                     "name": row["name"],
                     "label": row["display_label"],
                     "r": parse_float(row["openrank_sum"], "openrank_sum"),
@@ -964,10 +1814,50 @@ def compact_number(value: float, digits: int) -> int | float:
     return rounded
 
 
+def facet_summary(
+    nodes: list[dict[str, Any]],
+    output_nodes: list[dict[str, Any]],
+    facet: str,
+    *,
+    colors: dict[str, str] | None = None,
+    fixed_order: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    members: dict[str, list[int]] = defaultdict(list)
+    for node_index, node in enumerate(output_nodes):
+        members[node["areas"][facet]["primary"]].append(node_index)
+
+    if fixed_order is None:
+        ordered_names = sorted(members, key=lambda name: (-len(members[name]), name))
+    else:
+        order_index = {name: index for index, name in enumerate(fixed_order)}
+        ordered_names = sorted(
+            members,
+            key=lambda name: (order_index.get(name, len(order_index)), name),
+        )
+
+    summary: list[dict[str, Any]] = []
+    for name in ordered_names:
+        indexes = members[name]
+        representative = min(
+            indexes,
+            key=lambda index: (-nodes[index]["r"], -output_nodes[index]["degree"], nodes[index]["id"]),
+        )
+        item: dict[str, Any] = {
+            "name": name,
+            "count": len(indexes),
+            "representative": nodes[representative]["name"],
+        }
+        if colors is not None:
+            item["color"] = colors.get(name, stable_color(f"facet:{facet}:{name}"))
+        summary.append(item)
+    return summary
+
+
 def build_payload(
     nodes_path: Path,
     edges_path: Path,
     manifest_path: Path,
+    area_enrichment_path: Path | None,
     *,
     max_iterations: int,
     resolution: float,
@@ -975,6 +1865,7 @@ def build_payload(
 ) -> dict[str, Any]:
     nodes, index_by_id = read_nodes(nodes_path)
     edges, adjacency, degree = read_edges(edges_path, index_by_id, len(nodes))
+    area_enrichment = load_area_enrichment(area_enrichment_path)
 
     with manifest_path.open("r", encoding="utf-8") as handle:
         manifest = json.load(handle)
@@ -1036,12 +1927,6 @@ def build_payload(
             }
         )
 
-    language_counts = Counter(node["lang"] for node in nodes)
-    language_summary = [
-        {"name": name, "count": count, "color": language_color(name)}
-        for name, count in sorted(language_counts.items(), key=lambda item: (-item[1], item[0]))
-    ]
-
     # Strength-first ordering lets the UI cheaply choose the first 8k, 20k, or
     # all edges as density presets while retaining the most meaningful links.
     sorted_edge_items = sorted(
@@ -1054,6 +1939,12 @@ def build_payload(
     output_nodes: list[dict[str, Any]] = []
     for node_index, node in enumerate(nodes):
         x, y = coordinates[node_index]
+        ai_area = classify_ai(node)
+        domain_area = classify_domain(node, ai_area)
+        curated = area_enrichment.get(f"repo:{normalize_repo_id(node['repoId'])}")
+        if curated is None:
+            curated = area_enrichment.get(f"name:{node['name'].strip().casefold()}")
+        ai_area, domain_area = apply_curated_areas(ai_area, domain_area, curated)
         output_nodes.append(
             {
                 "id": node["id"],
@@ -1064,6 +1955,15 @@ def build_payload(
                 "r": compact_number(node["r"], 3),
                 "c": community_ids[node_index],
                 "lang": node["lang"],
+                "areas": {
+                    "language": {
+                        "primary": node["lang"],
+                        "source": "nodes.csv:primary_language",
+                        "confidence": 1,
+                    },
+                    "domain": domain_area,
+                    "ai": ai_area,
+                },
                 "contributors": node["contributors"],
                 "degree": degree[node_index],
                 "topics": node["topics"],
@@ -1083,6 +1983,26 @@ def build_payload(
         }
         for edge_index, (source, target, weight, shared, strength) in sorted_edge_items
     ]
+
+    language_summary = facet_summary(
+        nodes,
+        output_nodes,
+        "language",
+        colors={language: language_color(language) for language in {node["lang"] for node in nodes}},
+    )
+    domain_summary = facet_summary(
+        nodes,
+        output_nodes,
+        "domain",
+        colors=DOMAIN_COLORS,
+    )
+    ai_summary = facet_summary(
+        nodes,
+        output_nodes,
+        "ai",
+        colors=AI_COLORS,
+        fixed_order=AI_SUBCATEGORY_ORDER + ("Non-AI",),
+    )
 
     return {
         "meta": {
@@ -1104,7 +2024,14 @@ def build_payload(
                 "shared": twin_shared,
                 "strength": compact_number(twin_strength, 6),
             },
+            "source": "github",
             "languages": language_summary,
+            "facets": {
+                "language": language_summary,
+                "ai": ai_summary,
+                "domain": domain_summary,
+            },
+            "facetOrder": ["language", "ai", "domain"],
             "communities": community_summary,
             "bounds": bounds,
             "edgeOrder": "strength-desc",
@@ -1157,6 +2084,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-iterations", type=int, default=32)
     parser.add_argument("--resolution", type=float, default=1.15)
     parser.add_argument("--layout-iterations", type=int, default=108)
+    parser.add_argument(
+        "--area-enrichment",
+        type=Path,
+        help=(
+            "Optional curated area-label JSON. Defaults to area-enrichment.json "
+            "inside --artifact-dir when that file exists."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1171,10 +2106,18 @@ def main(argv: list[str] | None = None) -> int:
 
     artifact_dir = args.artifact_dir.resolve()
     output_path = args.output.resolve()
+    if args.area_enrichment is not None:
+        area_enrichment_path: Path | None = args.area_enrichment.resolve()
+        if not area_enrichment_path.is_file():
+            raise ValueError(f"Area enrichment file does not exist: {area_enrichment_path}")
+    else:
+        enrichment_candidate = artifact_dir / "area-enrichment.json"
+        area_enrichment_path = enrichment_candidate if enrichment_candidate.is_file() else None
     payload = build_payload(
         artifact_dir / "nodes.csv",
         artifact_dir / "edges.csv",
         artifact_dir / "manifest.json",
+        area_enrichment_path,
         max_iterations=args.max_iterations,
         resolution=args.resolution,
         layout_iterations=args.layout_iterations,
@@ -1190,6 +2133,14 @@ def main(argv: list[str] | None = None) -> int:
                 "edges": payload["meta"]["edgeCount"],
                 "communities": len(payload["meta"]["communities"]),
                 "languages": len(payload["meta"]["languages"]),
+                "domains": len(payload["meta"]["facets"]["domain"]),
+                "aiSubcategories": len(payload["meta"]["facets"]["ai"]) - 1,
+                "aiNodes": sum(
+                    item["count"]
+                    for item in payload["meta"]["facets"]["ai"]
+                    if item["name"] != "Non-AI"
+                ),
+                "areaEnrichment": str(area_enrichment_path) if area_enrichment_path else None,
                 "iterations": payload["meta"]["iterations"],
                 "layout": payload["meta"]["layout"],
             },

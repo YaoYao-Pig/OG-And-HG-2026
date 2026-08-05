@@ -2,6 +2,16 @@
 
 这个工具把 ClickHouse 中最近 12 个完整月的数据转换成 Graphia 可直接打开的仓库协作网络。大规模筛选、聚合、二部图投影和边裁剪全部在 ClickHouse 内完成，本地只接收最终节点和边，绝不下载 `events` 明细。
 
+## Web 双星图
+
+仓库同时包含一套可交互的科学图版式 Web Atlas：
+
+- **OpenGalaxy**：4,243 个 GitHub 仓库、46,173 条协作关系，可按语言、AI 子领域和总技术领域观察。
+- **HubGalaxy**：从 [`cfahlgren1/hub-stats`](https://huggingface.co/datasets/cfahlgren1/hub-stats) 每日快照抽取的模型、数据集与 Space 生态。
+- **自动发布**：[GitHub Actions workflow](.github/workflows/pages.yml) 在 `main` 更新、手动触发及每日计划任务时构建 GitHub Pages。
+
+前端开发、数据重建与首次 Pages 设置见 [visualization/README.md](visualization/README.md)。
+
 ## 仓库内的可直接使用成品
 
 默认 Preview 已经生成并完成完整性校验，周期为 2025-08 至 2026-07：

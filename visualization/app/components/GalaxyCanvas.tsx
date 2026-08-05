@@ -6,7 +6,12 @@ import {
   useRef,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import type { EdgeDensity, GalaxyGraph, ViewCommand } from "../galaxy-types";
+import {
+  nodeFacetValue,
+  type EdgeDensity,
+  type GalaxyGraph,
+  type ViewCommand,
+} from "../galaxy-types";
 
 const AREA_COLORS = [
   "#3155d6",
@@ -44,7 +49,8 @@ type GalaxyCanvasProps = {
   graph: GalaxyGraph;
   selectedIndex: number | null;
   hoveredIndex: number | null;
-  language: string | null;
+  facet: string;
+  facetValue: string | null;
   density: EdgeDensity;
   minStrength: number;
   viewCommand: ViewCommand;
@@ -69,7 +75,8 @@ export function GalaxyCanvas({
   graph,
   selectedIndex,
   hoveredIndex,
-  language,
+  facet,
+  facetValue,
   density,
   minStrength,
   viewCommand,
@@ -101,7 +108,8 @@ export function GalaxyCanvas({
   const propsRef = useRef({
     selectedIndex,
     hoveredIndex,
-    language,
+    facet,
+    facetValue,
     density,
     minStrength,
     onSelect,
@@ -123,9 +131,33 @@ export function GalaxyCanvas({
     return { minX, maxX, minY, maxY };
   }, [graph]);
 
-  const languageOrder = useMemo(
-    () => new Map((graph.meta.languages ?? []).map((item, index) => [item.name, index])),
-    [graph],
+  const facetOrder = useMemo(
+    () =>
+      new Map(
+        (
+          graph.meta.facets?.[facet] ??
+          (facet === "language" ? graph.meta.languages : undefined) ??
+          []
+        )
+          .filter((item) => facet !== "ai" || item.name !== "Non-AI")
+          .map((item, index) => [item.name, index]),
+      ),
+    [facet, graph],
+  );
+
+  const facetColors = useMemo(
+    () =>
+      new Map(
+        (
+          graph.meta.facets?.[facet] ??
+          (facet === "language" ? graph.meta.languages : undefined) ??
+          []
+        ).map((item, index) => [
+          item.name,
+          item.color ?? AREA_COLORS[index % AREA_COLORS.length],
+        ]),
+      ),
+    [facet, graph],
   );
 
   const annotationIndices = useMemo(() => {
@@ -134,19 +166,20 @@ export function GalaxyCanvas({
       .filter(({ node }) => Boolean(node.label))
       .sort((a, b) => b.node.r - a.node.r);
     const chosen: typeof candidates = [];
-    const usedLanguages = new Set<string>();
+    const usedFacetValues = new Set<string>();
     for (const candidate of candidates) {
       if (chosen.length >= 14) break;
       const separated = chosen.every((item) => {
         const delta = Math.abs(candidate.angle - item.angle);
         return Math.min(delta, Math.PI * 2 - delta) > 0.23;
       });
-      if (!separated || usedLanguages.has(candidate.node.lang)) continue;
+      const value = nodeFacetValue(candidate.node, facet);
+      if (!separated || usedFacetValues.has(value)) continue;
       chosen.push(candidate);
-      usedLanguages.add(candidate.node.lang);
+      usedFacetValues.add(value);
     }
     return chosen.map(({ index }) => index);
-  }, [graph]);
+  }, [facet, graph]);
 
   const edgesByNode = useMemo(() => {
     const result = Array.from({ length: graph.nodes.length }, () => [] as number[]);
@@ -161,14 +194,15 @@ export function GalaxyCanvas({
     propsRef.current = {
       selectedIndex,
       hoveredIndex,
-      language,
+      facet,
+      facetValue,
       density,
       minStrength,
       onSelect,
       onHover,
     };
     requestDrawRef.current();
-  }, [density, hoveredIndex, language, minStrength, onHover, onSelect, selectedIndex]);
+  }, [density, facet, facetValue, hoveredIndex, minStrength, onHover, onSelect, selectedIndex]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -185,8 +219,8 @@ export function GalaxyCanvas({
     };
 
     const nodeColor = (index: number) => {
-      const order = languageOrder.get(graph.nodes[index].lang) ?? 99;
-      return order < AREA_COLORS.length ? AREA_COLORS[order] : "#a5aaad";
+      const value = nodeFacetValue(graph.nodes[index], facet);
+      return facetColors.get(value) ?? "#a5aaad";
     };
 
     const worldToScreen = (x: number, y: number) => ({
@@ -195,8 +229,9 @@ export function GalaxyCanvas({
     });
 
     const nodeVisible = (index: number) =>
-      propsRef.current.language === null ||
-      graph.nodes[index]?.lang === propsRef.current.language;
+      propsRef.current.facetValue === null ||
+      nodeFacetValue(graph.nodes[index], propsRef.current.facet) ===
+        propsRef.current.facetValue;
 
     const edgeVisible = (edgeIndex: number) => {
       const edge = graph.edges[edgeIndex];
@@ -299,7 +334,7 @@ export function GalaxyCanvas({
         const edge = graph.edges[edgeIndex];
         const sourceVisible = nodeVisible(edge.s);
         const targetVisible = nodeVisible(edge.t);
-        if (propsRef.current.language !== null && (!sourceVisible || !targetVisible)) continue;
+        if (propsRef.current.facetValue !== null && (!sourceVisible || !targetVisible)) continue;
         const source = graph.nodes[edge.s];
         const target = graph.nodes[edge.t];
         const a = worldToScreen(source.x, source.y);
@@ -309,7 +344,7 @@ export function GalaxyCanvas({
         context.lineTo(b.x, b.y);
       }
       context.strokeStyle =
-        propsRef.current.language === null
+        propsRef.current.facetValue === null
           ? propsRef.current.density === "all"
             ? "rgba(215,220,224,.047)"
             : "rgba(215,220,224,.075)"
@@ -321,7 +356,7 @@ export function GalaxyCanvas({
       for (let edgeIndex = 0; edgeIndex < Math.min(500, graph.edges.length); edgeIndex += 1) {
         if (!edgeVisible(edgeIndex)) continue;
         const edge = graph.edges[edgeIndex];
-        if (propsRef.current.language !== null && (!nodeVisible(edge.s) || !nodeVisible(edge.t))) continue;
+        if (propsRef.current.facetValue !== null && (!nodeVisible(edge.s) || !nodeVisible(edge.t))) continue;
         const source = graph.nodes[edge.s];
         const target = graph.nodes[edge.t];
         const a = worldToScreen(source.x, source.y);
@@ -343,8 +378,8 @@ export function GalaxyCanvas({
           0.5,
           3.15,
         ) * clamp(Math.pow(camera.zoom, 0.12), 0.9, 1.3);
-        const languageRank = languageOrder.get(node.lang) ?? 99;
-        context.globalAlpha = visible ? (languageRank < AREA_COLORS.length ? 0.82 : 0.55) : 0.035;
+        const facetRank = facetOrder.get(nodeFacetValue(node, facet)) ?? 99;
+        context.globalAlpha = visible ? (facetRank < 99 ? 0.82 : 0.5) : 0.035;
         context.beginPath();
         context.arc(point.x, point.y, radius, 0, Math.PI * 2);
         context.fillStyle = nodeColor(index);
@@ -546,7 +581,7 @@ export function GalaxyCanvas({
       canvas.removeEventListener("dblclick", doubleClick);
       if (state.animation !== null) cancelAnimationFrame(state.animation);
     };
-  }, [annotationIndices, bounds, edgesByNode, graph, languageOrder]);
+  }, [annotationIndices, bounds, edgesByNode, facet, facetColors, facetOrder, graph]);
 
   useEffect(() => {
     const state = stateRef.current;
