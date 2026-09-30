@@ -12,6 +12,7 @@ import {
   type GalaxyGraph,
   type ViewCommand,
 } from "../galaxy-types";
+import { buildDensityContours } from "./density-field";
 
 const AREA_COLORS = [
   "#3155d6",
@@ -113,6 +114,14 @@ function stableUnit(seed: number, salt: number) {
   return value - Math.floor(value);
 }
 
+function spectralColor(color: string) {
+  if (!/^#[\da-f]{6}$/i.test(color)) return color;
+  return "#" + [172, 191, 202].map((channel, index) =>
+    Math.round(Number.parseInt(color.slice(index * 2 + 1, index * 2 + 3), 16) * 0.78 + channel * 0.22)
+      .toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 export function GalaxyCanvas({
   graph,
   selectedIndex,
@@ -198,7 +207,7 @@ export function GalaxyCanvas({
           []
         ).map((item, index) => [
           item.name,
-          item.color ?? AREA_COLORS[index % AREA_COLORS.length],
+          spectralColor(item.color ?? AREA_COLORS[index % AREA_COLORS.length]),
         ]),
       ),
     [facet, graph],
@@ -389,6 +398,8 @@ export function GalaxyCanvas({
     return result;
   }, [graph]);
 
+  const densityContours = useMemo(() => buildDensityContours(graph.nodes), [graph]);
+
   useEffect(() => {
     propsRef.current = {
       selectedIndex,
@@ -435,6 +446,14 @@ export function GalaxyCanvas({
     const communityColorById = new Map(
       communityVisuals.map((community) => [community.id, community.color]),
     );
+    const contourPaths = densityContours.map(({ level, segments }) => {
+      const path = new Path2D();
+      for (let i = 0; i < segments.length; i += 4) {
+        path.moveTo(segments[i], segments[i + 1]);
+        path.lineTo(segments[i + 2], segments[i + 3]);
+      }
+      return { level, path };
+    });
     const glowSprites = new Map<string, HTMLCanvasElement>();
     const glowSprite = (color: string) => {
       const cached = glowSprites.get(color);
@@ -474,6 +493,7 @@ export function GalaxyCanvas({
     const inPlot = (x: number, y: number, margin = 0) =>
       Math.hypot(x - state.plotX, y - state.plotY) <= state.plotRadius + margin;
 
+    const labelBoxes: { left: number; right: number; top: number; bottom: number }[] = [];
     const drawCallout = (index: number, emphasized = false) => {
       const node = graph.nodes[index];
       if (!node) return;
@@ -494,14 +514,36 @@ export function GalaxyCanvas({
       const rightSide = directionX >= 0;
       const tail = clamp(Math.abs(directionX) * 50 + 18, 18, 64) * (rightSide ? 1 : -1);
       let labelX = knee.x + tail;
-      const labelY = knee.y;
+      let labelY = clamp(knee.y, 134, state.height - 113);
       if (rightSide) labelX = Math.min(labelX, state.width - 18);
       else labelX = Math.max(labelX, state.sidebarEdge + 14);
 
       context.save();
+      context.font = `${emphasized ? 600 : 500} ${emphasized ? 13 : 11}px Arial, sans-serif`;
+      let label = emphasized ? node.name : shortName(node.name);
+      const maxLabelWidth = Math.min(220, state.width - state.sidebarEdge - 60);
+      while (label.length > 5 && context.measureText(label).width > maxLabelWidth) {
+        label = label.slice(0, -2).replace(/…$/, "") + "…";
+      }
+      const labelWidth = context.measureText(label).width + 14;
+      labelX = clamp(labelX, state.sidebarEdge + 14 + (rightSide ? labelWidth : 0),
+        state.width - 18 - (rightSide ? 0 : labelWidth));
+      const left = rightSide ? labelX - labelWidth : labelX;
+      const right = left + labelWidth;
+      let attempts = 0;
+      while (labelBoxes.some((box) => left < box.right + 8 && right > box.left - 8 &&
+        labelY - 18 < box.bottom && labelY > box.top) && attempts < 5) {
+        labelY += point.y < state.plotY ? -22 : 22;
+        attempts++;
+      }
+      if (!emphasized && (attempts === 5 || labelY < 134 || labelY > state.height - 113)) {
+        context.restore();
+        return;
+      }
+      labelBoxes.push({ left, right, top: labelY - 21, bottom: labelY + 3 });
       context.strokeStyle = emphasized ? "rgba(255,255,255,.72)" : "rgba(215,220,224,.42)";
       context.lineWidth = emphasized ? 0.85 : 0.6;
-      context.setLineDash([1.5, 3]);
+      context.setLineDash(emphasized ? [] : [1, 3.5]);
       context.beginPath();
       context.moveTo(point.x, point.y);
       context.lineTo(rim.x, rim.y);
@@ -519,12 +561,11 @@ export function GalaxyCanvas({
       context.fillStyle = emphasized ? "#ffffff" : "rgba(231,234,236,.72)";
       context.fill();
 
-      context.font = `${emphasized ? 650 : 580} ${emphasized ? 13 : 11}px Arial, sans-serif`;
       context.textAlign = rightSide ? "right" : "left";
       context.textBaseline = "bottom";
       context.fillStyle = emphasized ? "#ffffff" : "rgba(236,239,241,.82)";
       const offset = rightSide ? -7 : 7;
-      context.fillText(emphasized ? node.name : shortName(node.name), labelX + offset, labelY - 5);
+      context.fillText(label, labelX + offset, labelY - 5);
       context.restore();
     };
 
@@ -571,19 +612,18 @@ export function GalaxyCanvas({
       context.fillStyle = "#020202";
       context.fillRect(plotX - plotRadius, plotY - plotRadius, plotRadius * 2, plotRadius * 2);
 
-      const vignette = context.createRadialGradient(
-        plotX,
-        plotY,
-        plotRadius * 0.12,
-        plotX,
-        plotY,
-        plotRadius,
-      );
-      vignette.addColorStop(0, "rgba(255,255,255,.015)");
-      vignette.addColorStop(0.72, "rgba(255,255,255,0)");
-      vignette.addColorStop(1, "rgba(0,0,0,.34)");
-      context.fillStyle = vignette;
-      context.fillRect(plotX - plotRadius, plotY - plotRadius, plotRadius * 2, plotRadius * 2);
+      if (!lowDetail && propsRef.current.facetValue === null && camera.zoom < 2.4) {
+        context.save();
+        context.translate(plotX - camera.x * cameraScale, plotY - camera.y * cameraScale);
+        context.scale(cameraScale, cameraScale);
+        context.lineWidth = 0.55 / cameraScale;
+        const fade = clamp((2.4 - camera.zoom) / 1.4, 0, 1);
+        for (const contour of contourPaths) {
+          context.strokeStyle = `rgba(166,189,199,${(0.045 + contour.level * 0.023) * fade})`;
+          context.stroke(contour.path);
+        }
+        context.restore();
+      }
 
       const nebulaFade = propsRef.current.glowEnabled
         ? clamp((2.4 - camera.zoom) / 1.1, 0, 1)
@@ -617,7 +657,7 @@ export function GalaxyCanvas({
           const offset = baseRadius * (lobe === 0 ? 0 : 0.12 + stableUnit(community.id, lobe) * 0.08);
           const lobeRadius = baseRadius * (lobe === 0 ? 0.88 : 0.56 + stableUnit(community.id, lobe + 5) * 0.2);
           const alpha =
-            (propsRef.current.facetValue === null ? 0.032 : 0.045) *
+            (propsRef.current.facetValue === null ? 0.024 : 0.038) *
             activeShare *
             Math.sqrt(community.count / largestCommunity) *
             nebulaFade *
@@ -728,7 +768,7 @@ export function GalaxyCanvas({
                 "#aab0b4",
               (propsRef.current.facetValue === null
                 ? propsRef.current.density === "all"
-                  ? 0.023
+                  ? 0.018
                   : 0.038
                 : 0.064) * edgeAlphaScale,
             ),
@@ -752,8 +792,8 @@ export function GalaxyCanvas({
       const nodeRadius = (index: number) => {
         const tier = nodeVisuals.tiers[index];
         const scoreShare = clamp(nodeVisuals.scores[index] / maxScore, 0, 1);
-        if (tier === 3) return (3.2 + scoreShare * 3.1) * zoomRadius;
-        if (tier === 2) return (1.75 + scoreShare * 2.05) * zoomRadius;
+        if (tier === 3) return (2.1 + scoreShare * 2.3) * zoomRadius;
+        if (tier === 2) return (1.35 + scoreShare * 1.7) * zoomRadius;
         if (tier === 1) return (0.82 + scoreShare * 1.35) * zoomRadius;
         return clamp(0.31 + Math.log1p(graph.nodes[index].degree) * 0.045, 0.35, 0.72) * zoomRadius;
       };
@@ -765,7 +805,7 @@ export function GalaxyCanvas({
           if (screenInPlot[index] === 0) continue;
           const radius = nodeRadius(index);
           const haloRadius = radius * 3.2 + 5;
-          context.globalAlpha = 0.2;
+          context.globalAlpha = 0.12;
           const sprite = glowSprite(nodeColor(index));
           context.drawImage(
             sprite,
@@ -777,6 +817,7 @@ export function GalaxyCanvas({
         }
       }
 
+      context.globalCompositeOperation = "source-over";
       for (let index = graph.nodes.length - 1; index >= 0; index -= 1) {
         if (nodeVisuals.tiers[index] !== 0) continue;
         const node = graph.nodes[index];
@@ -816,21 +857,20 @@ export function GalaxyCanvas({
         const radius = nodeRadius(index);
         context.beginPath();
         context.arc(screenX[index], screenY[index], radius + 3.8, 0, Math.PI * 2);
-        context.strokeStyle = "rgba(238,241,242,.28)";
+        context.strokeStyle = "rgba(215,229,234,.32)";
         context.lineWidth = 0.55;
         context.stroke();
         context.beginPath();
-        context.arc(screenX[index], screenY[index], radius + 7.2, 0, Math.PI * 2);
-        context.strokeStyle = "rgba(220,225,228,.12)";
-        context.lineWidth = 0.45;
-        context.stroke();
+        context.arc(screenX[index], screenY[index], 0.8, 0, Math.PI * 2);
+        context.fillStyle = "rgba(239,246,247,.86)";
+        context.fill();
       }
 
       if (focused !== null) {
         context.fillStyle =
           propsRef.current.selectedIndex !== null
-            ? "rgba(0,0,0,.59)"
-            : "rgba(0,0,0,.29)";
+            ? "rgba(0,0,0,.44)"
+            : "rgba(0,0,0,.20)";
         context.fillRect(plotX - plotRadius, plotY - plotRadius, plotRadius * 2, plotRadius * 2);
         const connected = new Set<number>([focused]);
         for (const edgeIndex of edgesByNode[focused] ?? []) {
@@ -842,19 +882,28 @@ export function GalaxyCanvas({
           context.beginPath();
           context.moveTo(screenX[edge.s], screenY[edge.s]);
           context.lineTo(screenX[edge.t], screenY[edge.t]);
-          context.strokeStyle = "rgba(236,239,241,.55)";
+          context.strokeStyle = `rgba(214,230,235,${clamp(0.2 + Math.log1p(edge.strength) * 0.12, 0.2, 0.72)})`;
           context.lineWidth = clamp(0.55 + Math.log1p(edge.strength) * 0.16, 0.6, 1.6);
           context.stroke();
         }
         for (const index of connected) {
           const isFocus = index === focused;
           context.beginPath();
-          context.arc(screenX[index], screenY[index], isFocus ? 4 : 1.6, 0, Math.PI * 2);
+          context.arc(screenX[index], screenY[index], isFocus ? Math.max(nodeRadius(index), 4) : 1.6, 0, Math.PI * 2);
           context.fillStyle = isFocus ? "#ffffff" : nodeColor(index);
           context.globalAlpha = isFocus ? 1 : 0.82;
           context.fill();
         }
         context.globalAlpha = 1;
+        const focusRadius = Math.max(nodeRadius(focused), 4) + 9;
+        context.strokeStyle = "rgba(228,242,247,.9)";
+        context.lineWidth = 0.8;
+        for (let quadrant = 0; quadrant < 4; quadrant++) {
+          const angle = quadrant * Math.PI / 2;
+          context.beginPath();
+          context.arc(screenX[focused], screenY[focused], focusRadius, angle + 0.18, angle + 0.68);
+          context.stroke();
+        }
       }
       context.restore();
 
@@ -864,6 +913,56 @@ export function GalaxyCanvas({
       context.lineWidth = 0.7;
       context.stroke();
 
+      // Viewport measurements are in graph-layout space, never sky coordinates.
+      context.save();
+      context.strokeStyle = "rgba(176,198,207,.24)";
+      context.lineWidth = 0.65;
+      for (let tick = 0; tick < 72; tick++) {
+        if (tick % 18 === 1 || tick % 18 === 17) continue;
+        const angle = tick * Math.PI / 36;
+        const major = tick % 6 === 0;
+        const inner = plotRadius - (major ? 8 : 4);
+        context.beginPath();
+        context.moveTo(plotX + Math.cos(angle) * inner, plotY + Math.sin(angle) * inner);
+        context.lineTo(plotX + Math.cos(angle) * (plotRadius - 1), plotY + Math.sin(angle) * (plotRadius - 1));
+        context.stroke();
+      }
+      if (width >= 900) {
+        const left = state.sidebarEdge + 26;
+        const right = width - 30;
+        const top = 64;
+        const bottom = height - 70;
+        context.strokeStyle = "rgba(176,198,207,.2)";
+        for (const [x, y, dx, dy] of [[left, top, 1, 1], [right, top, -1, 1], [left, bottom, 1, -1], [right, bottom, -1, -1]]) {
+          context.beginPath();
+          context.moveTo(x, y + dy * 13); context.lineTo(x, y); context.lineTo(x + dx * 13, y);
+          context.stroke();
+        }
+        context.font = "10px ui-monospace, Consolas, monospace";
+        context.textAlign = "left";
+        context.fillStyle = "rgba(163,187,197,.68)";
+        context.fillText(`MAG ${(camera.zoom / 0.96).toFixed(2)}×`, left + 10, top + 22);
+        let visibleCount = 0;
+        for (let i = 0; i < graph.nodes.length; i++) {
+          if (visibleMask[i] && (screenX[i] - plotX) ** 2 + (screenY[i] - plotY) ** 2 <= plotRadius ** 2) visibleCount++;
+        }
+        context.fillStyle = "rgba(148,163,172,.48)";
+        context.fillText(`IN VIEW  ${visibleCount.toLocaleString("en-US")}`, left + 10, top + 39);
+        const targetUnits = 76 / cameraScale;
+        const magnitude = 10 ** Math.floor(Math.log10(targetUnits));
+        const scaleUnits = [1, 2, 5, 10].map((n) => n * magnitude).find((n) => n >= targetUnits) ?? magnitude;
+        const scaleWidth = scaleUnits * cameraScale;
+        const scaleY = bottom - 15;
+        context.strokeStyle = "rgba(191,209,216,.48)";
+        context.beginPath();
+        context.moveTo(left + 10, scaleY - 4); context.lineTo(left + 10, scaleY);
+        context.lineTo(left + 10 + scaleWidth, scaleY); context.lineTo(left + 10 + scaleWidth, scaleY - 4);
+        context.stroke();
+        context.fillText(`${Number(scaleUnits.toPrecision(2))} LAYOUT UNITS`, left + 10, scaleY - 10);
+      }
+      context.restore();
+
+      labelBoxes.length = 0;
       if (width >= 900 && camera.zoom < 1.32 && focused === null) {
         for (const index of annotationIndices) drawCallout(index);
       }
@@ -888,7 +987,10 @@ export function GalaxyCanvas({
       canvas.width = Math.round(state.width * state.dpr);
       canvas.height = Math.round(state.height * state.dpr);
       const desktop = state.width >= 900;
-      state.sidebarEdge = desktop ? clamp(state.width * 0.305, 360, 470) : 0;
+      state.sidebarEdge = desktop
+        ? canvas.parentElement?.querySelector(".editorial-column")?.getBoundingClientRect().right
+          ?? clamp(state.width * 0.305, 360, 470)
+        : 0;
       const availableWidth = state.width - state.sidebarEdge;
       state.plotRadius = desktop
         ? Math.min(state.height * 0.435, availableWidth * 0.43)
@@ -1035,6 +1137,7 @@ export function GalaxyCanvas({
       canvas.removeEventListener("dblclick", doubleClick);
       if (state.animation !== null) cancelAnimationFrame(state.animation);
       if (scheduledDraw !== null) cancelAnimationFrame(scheduledDraw);
+      state.animation = null;
       if (settleTimer !== null) clearTimeout(settleTimer);
       if (requestDrawRef.current === scheduleDraw) {
         requestDrawRef.current = () => undefined;
@@ -1047,6 +1150,7 @@ export function GalaxyCanvas({
     annotationIndices,
     bounds,
     communityVisuals,
+    densityContours,
     edgeLayers,
     edgesByNode,
     facet,

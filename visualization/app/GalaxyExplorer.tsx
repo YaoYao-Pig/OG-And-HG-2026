@@ -650,6 +650,7 @@ export default function GalaxyExplorer() {
                 <p>[2] 谱系与同发布者关系为直接信号；语义亲和边标记为 inferred，不等同于依赖关系。</p>
               </>
             )}
+            <p>[3] 概览等高线表示节点密度；比例尺使用布局坐标，不代表物理距离。</p>
           </div>
         </div>
       </aside>

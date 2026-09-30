@@ -1,12 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --black: #000000;
-  --white: #f2f2f0;
-  --gray-1: #c9c9c5;
-  --gray-2: #8d8d89;
-  --gray-3: #555552;
-  --hairline: rgba(255, 255, 255, 0.32);
+  --black: #030507;
+  --white: #edf2f4;
+  --gray-1: #c0cbd1;
+  --gray-2: #899ba6;
+  --gray-3: #53646f;
+  --hairline: rgba(181, 205, 219, 0.22);
+  --instrument: #adc6d2;
   --sidebar: clamp(360px, 30.5vw, 470px);
 }
 
@@ -25,7 +26,7 @@ body {
 
 body {
   overflow: hidden;
-  font-family: var(--font-geist-sans), Arial, "Microsoft YaHei", sans-serif;
+  font-family: var(--font-geist-sans, Arial), Arial, "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -65,7 +66,7 @@ canvas:focus-visible {
   height: 100dvh;
   overflow: hidden;
   isolation: isolate;
-  background: #000;
+  background: var(--black);
 }
 
 .galaxy-canvas {
@@ -76,6 +77,7 @@ canvas:focus-visible {
   height: 100%;
   cursor: grab;
   touch-action: none;
+  animation: field-reveal 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .galaxy-canvas.is-dragging {
@@ -88,7 +90,8 @@ canvas:focus-visible {
   inset: 0 auto 0 0;
   width: var(--sidebar);
   padding: 34px 30px 26px;
-  background: #000;
+  background: var(--black);
+  border-right: 1px solid rgba(162, 190, 205, 0.1);
 }
 
 .editorial-scroll {
@@ -114,7 +117,7 @@ canvas:focus-visible {
   border: 0;
   border-bottom: 1px solid transparent;
   background: transparent;
-  font: 540 7px/1 var(--font-geist-mono), monospace;
+  font: 500 10px/1.4 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.1em;
   cursor: pointer;
 }
@@ -131,8 +134,8 @@ canvas:focus-visible {
 
 .figure-index {
   margin: 0 0 24px;
-  color: #6d6d69;
-  font: 520 8px/1.2 var(--font-geist-mono), monospace;
+  color: var(--gray-2);
+  font: 500 9px/1.5 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.16em;
 }
 
@@ -144,9 +147,9 @@ canvas:focus-visible {
   border: 0;
   background: transparent;
   font-size: clamp(40px, 3.5vw, 56px);
-  font-weight: 650;
+  font-weight: 520;
   line-height: 0.95;
-  letter-spacing: -0.052em;
+  letter-spacing: -0.06em;
   cursor: pointer;
 }
 
@@ -154,7 +157,7 @@ canvas:focus-visible {
   display: block;
   margin-top: 9px;
   color: #b9b9b5;
-  font: 420 14px/1 var(--font-geist-mono), monospace;
+  font: 420 14px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.08em;
 }
 
@@ -209,7 +212,7 @@ canvas:focus-visible {
 
 .plain-search > span {
   color: #4e4e4b;
-  font: 500 8px/1 var(--font-geist-mono), monospace;
+  font: 500 8px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
 }
 
 .plain-search-results {
@@ -254,14 +257,14 @@ canvas:focus-visible {
 
 .plain-search-results small {
   color: #73736f;
-  font: 500 8px/1 var(--font-geist-mono), monospace;
+  font: 500 8px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
 }
 
 .plain-search-results p {
   margin: 0;
   padding: 14px 3px;
   color: #696965;
-  font: 500 8px/1 var(--font-geist-mono), monospace;
+  font: 500 8px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.1em;
 }
 
@@ -272,7 +275,7 @@ canvas:focus-visible {
 .plate-introduction p {
   margin: 0 0 13px;
   color: #d0d0cc;
-  font-size: clamp(10px, 0.82vw, 12px);
+  font-size: 12px;
   line-height: 1.58;
 }
 
@@ -304,7 +307,7 @@ canvas:focus-visible {
   border: 0;
   border-bottom: 1px solid transparent;
   background: transparent;
-  font: 520 7px/1 var(--font-geist-mono), monospace;
+  font: 500 10px/1.3 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.06em;
   cursor: pointer;
 }
@@ -327,7 +330,7 @@ canvas:focus-visible {
   min-height: 28px;
   color: #bdbdb9;
   border-bottom: 1px solid rgba(255, 255, 255, 0.26);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 600;
 }
 
@@ -367,8 +370,9 @@ canvas:focus-visible {
 }
 
 .area-index > button > i {
-  width: 24px;
-  height: 6px;
+  width: 21px;
+  height: 3px;
+  filter: saturate(0.78);
   display: block;
 }
 
@@ -386,7 +390,7 @@ canvas:focus-visible {
 }
 
 .area-index b {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 620;
 }
 
@@ -394,7 +398,7 @@ canvas:focus-visible {
   overflow: hidden;
   margin-top: 2px;
   color: #6f6f6b;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 430;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -403,7 +407,7 @@ canvas:focus-visible {
 .area-index > button > span:last-child {
   color: #cfcfca;
   text-align: right;
-  font: 500 8px/1 var(--font-geist-mono), monospace;
+  font: 400 10px/1.3 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
 }
 
 .area-index > button.area-expand {
@@ -412,7 +416,7 @@ canvas:focus-visible {
   align-items: center;
   justify-content: space-between;
   color: #73736f;
-  font: 520 7px/1 var(--font-geist-mono), monospace;
+  font: 520 7px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.08em;
 }
 
@@ -452,7 +456,7 @@ canvas:focus-visible {
 
 .strongest-relation span {
   color: #6c6c68;
-  font: 520 7px/1 var(--font-geist-mono), monospace;
+  font: 520 7px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -470,13 +474,13 @@ canvas:focus-visible {
 }
 
 .plot-controls {
-  display: grid;
-  grid-template-columns: auto auto auto 1fr;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 10px 14px;
   margin-top: 18px;
   color: #60605c;
-  font: 500 7px/1 var(--font-geist-mono), monospace;
+  font: 500 10px/1.4 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   text-transform: uppercase;
 }
 
@@ -486,7 +490,9 @@ canvas:focus-visible {
   border: 0;
   border-bottom: 1px solid transparent;
   background: transparent;
-  font-size: 7px;
+  min-height: 28px;
+  font-size: 10px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -504,7 +510,7 @@ canvas:focus-visible {
 
 .plot-controls .glow-toggle span {
   color: #484845;
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.08em;
 }
 
@@ -514,6 +520,7 @@ canvas:focus-visible {
 
 .plot-controls label {
   min-width: 0;
+  width: 100%;
   display: grid;
   grid-template-columns: auto minmax(50px, 1fr);
   grid-column: 1 / -1;
@@ -537,7 +544,7 @@ canvas:focus-visible {
 .method-notes p {
   margin: 4px 0 0;
   color: #777773;
-  font-size: 7px;
+  font-size: 10px;
   line-height: 1.45;
 }
 
@@ -561,7 +568,7 @@ canvas:focus-visible {
 .repo-classification {
   margin: 22px 0 7px;
   color: #777773;
-  font: 520 8px/1.2 var(--font-geist-mono), monospace;
+  font: 520 8px/1.2 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.08em;
 }
 
@@ -599,14 +606,14 @@ canvas:focus-visible {
 
 .plain-metrics dt {
   color: #70706c;
-  font: 500 7px/1 var(--font-geist-mono), monospace;
+  font: 500 7px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   text-transform: uppercase;
 }
 
 .plain-metrics dd {
   margin: 9px 0 0;
   color: #e3e3df;
-  font: 500 13px/1 var(--font-geist-mono), monospace;
+  font: 500 13px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
 }
 
 .topic-line {
@@ -687,12 +694,12 @@ canvas:focus-visible {
   display: flex;
   gap: 18px;
   color: #5f5f5b;
-  font: 500 8px/1 var(--font-geist-mono), monospace;
+  font: 400 10px/1.4 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.07em;
 }
 
 .plate-meta b {
-  color: #d1d1cd;
+  color: var(--instrument);
   font-weight: 500;
 }
 
@@ -704,6 +711,7 @@ canvas:focus-visible {
   max-width: 360px;
   padding-left: 45px;
   text-align: right;
+  animation: readout-reveal 200ms ease-out both;
 }
 
 .hover-readout::before {
@@ -733,7 +741,7 @@ canvas:focus-visible {
 .hover-readout span {
   margin-top: 5px;
   color: #666662;
-  font: 500 7px/1 var(--font-geist-mono), monospace;
+  font: 400 10px/1.4 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
 }
 
 .plain-map-controls {
@@ -747,13 +755,13 @@ canvas:focus-visible {
 
 .plain-map-controls button {
   min-width: 20px;
-  height: 24px;
+  height: 32px;
   padding: 0;
   color: #777773;
   border: 0;
   border-bottom: 1px solid transparent;
   background: transparent;
-  font: 500 10px/1 var(--font-geist-mono), monospace;
+  font: 500 10px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   cursor: pointer;
 }
 
@@ -771,7 +779,7 @@ canvas:focus-visible {
   display: flex;
   justify-content: space-between;
   color: #3f3f3c;
-  font: 500 6px/1 var(--font-geist-mono), monospace;
+  font: 400 9px/1.5 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.1em;
 }
 
@@ -793,7 +801,7 @@ canvas:focus-visible {
   grid-column: 1 / -1;
   margin: 0 0 12px;
   color: #a2a29e;
-  font: 500 8px/1 var(--font-geist-mono), monospace;
+  font: 500 8px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -812,7 +820,7 @@ canvas:focus-visible {
 
 .minimal-loader > span {
   color: #777773;
-  font: 500 7px/1 var(--font-geist-mono), monospace;
+  font: 500 7px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
 }
 
 .minimal-loader button {
@@ -832,7 +840,17 @@ canvas:focus-visible {
   display: none;
 }
 
-@media (max-width: 1040px) and (min-width: 721px) {
+@keyframes field-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes readout-reveal {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 1040px) and (min-width: 900px) {
   :root {
     --sidebar: 340px;
   }
@@ -855,7 +873,7 @@ canvas:focus-visible {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 899px) {
   :root {
     --sidebar: 100vw;
   }
@@ -887,7 +905,7 @@ canvas:focus-visible {
   .mobile-masthead button:last-child,
   .mobile-masthead span {
     color: #777773;
-    font: 500 8px/1 var(--font-geist-mono), monospace;
+    font: 500 8px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   }
 
   .mobile-source-tabs {
@@ -902,7 +920,7 @@ canvas:focus-visible {
     border: 0;
     border-bottom: 1px solid transparent;
     background: transparent;
-    font: 500 6px/1 var(--font-geist-mono), monospace;
+    font: 500 6px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
     letter-spacing: 0.04em;
   }
 
@@ -947,7 +965,7 @@ canvas:focus-visible {
 
   .mobile-sheet-handle b {
     color: #696965;
-    font: 500 8px/1 var(--font-geist-mono), monospace;
+    font: 500 8px/1 var(--font-geist-mono, "SFMono-Regular"), Consolas, monospace;
   }
 
   .editorial-scroll {
@@ -976,7 +994,7 @@ canvas:focus-visible {
   }
 
   .plate-introduction p {
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .area-header,
